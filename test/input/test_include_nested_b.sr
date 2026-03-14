@@ -1,0 +1,9 @@
+// Second level that includes first level
+#include "test_include_nested_a.sr"
+
+struct Scene
+{
+    Light   mainLight;
+    Light   lights[4];
+    float3  ambientColor;
+};

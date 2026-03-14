@@ -1,0 +1,5 @@
+cbuffer ExampleMatrices { 
+   float2 before;
+   float2x3 mat;
+   float2x1 smol_mat;
+};

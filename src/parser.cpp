@@ -6,6 +6,37 @@
 #include <cctype>
 #include <cassert>
 #include <unordered_map>
+#include <unordered_set>
+#include <filesystem>
+#include <regex>
+
+namespace fs = std::filesystem;
+
+// ---------------------------------------------------------------------------
+// Static compile-time regex patterns for type parsing
+// ---------------------------------------------------------------------------
+
+// Pattern for HLSL scalar types with optional vector/matrix dimensions
+// Matches: scalar, scalar#, scalar#x#
+// E.g.: float, float3, float4x4, int2x2, half, double4, etc.
+static const std::regex g_hlslScalarTypeRegex(
+    R"(^(double|float|half|bool|uint|int)([1-4])?(x[1-4])?$)"
+);
+
+// ---------------------------------------------------------------------------
+// Include tracking to prevent circular dependencies
+// ---------------------------------------------------------------------------
+
+static thread_local std::unordered_set<std::string> g_includedFiles;
+
+// Resolve a file path relative to a base directory
+static std::string resolveIncludePath(const std::string& baseDir, const std::string& includeFile)
+{
+    fs::path basePath(baseDir);
+    fs::path baseDirPath = basePath.parent_path();
+    fs::path fullPath = baseDirPath / includeFile;
+    return fs::absolute(fullPath).string();
+}
 
 // ---------------------------------------------------------------------------
 // Tokenizer
@@ -14,7 +45,7 @@
 enum class TokKind
 {
     Ident, Number, LBrace, RBrace, LBracket, RBracket, LAngle, RAngle,
-    Semicolon, Comma, Star, Slash, Plus, Minus, Eq, Dot, Hash,
+    Semicolon, Comma, Star, Slash, Plus, Minus, Eq, Dot, Hash, String,
     Eof, Unknown
 };
 
@@ -64,6 +95,25 @@ struct Lexer
 
         int startLine = line;
         char c = src[pos];
+
+        // Handle quoted strings for #include filenames
+        if (c == '"')
+        {
+            ++pos;
+            size_t start = pos;
+            while (pos < src.size() && src[pos] != '"')
+            {
+                if (src[pos] == '\n') ++line;
+                ++pos;
+            }
+            if (pos >= src.size())
+            {
+                throw std::runtime_error("Unterminated string literal at line " + std::to_string(startLine));
+            }
+            std::string str = src.substr(start, pos - start);
+            ++pos;  // consume closing "
+            return {TokKind::String, str, startLine};
+        }
 
         if (std::isalpha((unsigned char)c) || c == '_')
         {
@@ -116,6 +166,9 @@ struct Lexer
 // ---------------------------------------------------------------------------
 // Parser context
 // ---------------------------------------------------------------------------
+
+// Forward declaration
+static ParseResult parseFileInternal(const std::string& path);
 
 struct Parser
 {
@@ -240,53 +293,47 @@ struct Parser
             return t;
         }
 
-        // float3x4 style?
-        // Pattern: scalarNameNxM or scalarNameN
-        // We decode from the combined ident
-        // Supported scalars as prefix: bool, half, float, double, int, uint
-        // uint16_t and int16_t are scalar only (no vector/matrix shorthand)
+        // Special cases: uint16_t and int16_t
         if (ident == "uint16_t") { t.scalar = ScalarKind::Uint16; t.rows = 1; t.cols = 1; return t; }
         if (ident == "int16_t")  { t.scalar = ScalarKind::Int16;  t.rows = 1; t.cols = 1; return t; }
 
-        // Try to split prefix + dims
-        static const std::vector<std::pair<std::string,ScalarKind>> prefixes = {
-            {"double", ScalarKind::Double},
-            {"float",  ScalarKind::Float},
-            {"half",   ScalarKind::Half},
-            {"bool",   ScalarKind::Bool},
-            {"uint",   ScalarKind::Uint},
-            {"int",    ScalarKind::Int},
-        };
-
-        for (auto& [prefix, sk] : prefixes)
+        // Standard HLSL types: scalar, scalar#, or scalar#x#
+        // Pattern: (double|float|half|bool|uint|int)([1-4])?(x[1-4])?
+        std::smatch matches;
+        if (!std::regex_match(ident, matches, g_hlslScalarTypeRegex))
         {
-            if (ident.substr(0, prefix.size()) == prefix)
-            {
-                std::string dims = ident.substr(prefix.size());
-                t.scalar = sk;
-                if (dims.empty()) { t.rows = 1; t.cols = 1; return t; }
-                // dims = "N" or "NxM"
-                auto xpos = dims.find('x');
-                if (xpos == std::string::npos)
-                {
-                    // vector or scalar1
-                    int n = std::stoi(dims);
-                    t.rows = 1; t.cols = n;
-                }
-                else
-                {
-                    int rows = std::stoi(dims.substr(0, xpos));
-                    int cols = std::stoi(dims.substr(xpos+1));
-                    t.rows = rows; t.cols = cols;
-                }
-                // Validate
-                if (t.cols < 1 || t.cols > 4 || t.rows < 1 || t.rows > 4)
-                    throw std::runtime_error(filePath+":"+std::to_string(lineNo)+": invalid type dims in '"+ident+"'");
-                return t;
-            }
+            throw std::runtime_error(filePath+":"+std::to_string(lineNo)+": unrecognised HLSL type '"+ident+"'");
         }
 
-        throw std::runtime_error(filePath+":"+std::to_string(lineNo)+": unrecognised HLSL type '"+ident+"'");
+        // Extract scalar type (group 1)
+        std::string scalarStr = matches[1].str();
+        t.scalar = scalarFromName(scalarStr, lineNo);
+
+        // Extract row dimension (group 2) - only present if NxM format or N format
+        std::string rowStr = matches[2].str();
+        std::string colStr = matches[3].str();  // includes the 'x' prefix, needs trimming
+
+        if (colStr.empty())
+        {
+            // Format: scalar or scalarN
+            t.rows = 1;
+            t.cols = rowStr.empty() ? 1 : std::stoi(rowStr);
+        }
+        else
+        {
+            // Format: scalarNxM
+            // colStr is like "x4", need to remove the 'x'
+            int cols = std::stoi(colStr.substr(1));
+            t.rows = std::stoi(rowStr);
+            t.cols = cols;
+            t.declaredAsMatrix = true;
+        }
+
+        // Validate dimensions
+        if (t.cols < 1 || t.cols > 4 || t.rows < 1 || t.rows > 4)
+            throw std::runtime_error(filePath+":"+std::to_string(lineNo)+": invalid type dims in '"+ident+"'");
+
+        return t;
     }
 
     // Parse array dimensions: zero or more [N] suffixes
@@ -396,10 +443,88 @@ struct Parser
     // Top-level parsing
     // -----------------------------------------------------------------------
 
+    // Handle #include directive
+    void parseInclude()
+    {
+        // cur is at Hash, next should be "include"
+        int hashLine = cur.line;
+        advance(); // consume #
+        
+        if (cur.kind != TokKind::Ident || cur.text != "include")
+        {
+            throw std::runtime_error(
+                filePath + ":" + std::to_string(cur.line) + 
+                ": expected 'include' after '#', got '" + cur.text + "'");
+        }
+        advance(); // consume "include"
+        
+        if (cur.kind != TokKind::String)
+        {
+            throw std::runtime_error(
+                filePath + ":" + std::to_string(cur.line) + 
+                ": expected filename string after '#include', got '" + cur.text + "'");
+        }
+        
+        std::string includeFile = cur.text;
+        advance(); // consume filename
+        
+        // Resolve the include path relative to the current file
+        std::string resolvedPath = resolveIncludePath(filePath, includeFile);
+        
+        // Check for circular includes
+        if (g_includedFiles.count(resolvedPath) > 0)
+        {
+            throw std::runtime_error(
+                filePath + ":" + std::to_string(hashLine) + 
+                ": circular include detected: " + resolvedPath);
+        }
+        
+        // Mark this file as included
+        g_includedFiles.insert(resolvedPath);
+        
+        // Parse the included file
+        try
+        {
+            ParseResult includedResult = parseFileInternal(resolvedPath);
+            
+            // Merge structs from included file into result
+            for (auto& st : includedResult.structs)
+            {
+                if (structMap.count(st.name) == 0)
+                {
+                    structMap[st.name] = result.structs.size();
+                    result.structs.push_back(std::move(st));
+                }
+                else
+                {
+                    throw std::runtime_error(
+                        filePath + ":" + std::to_string(hashLine) + 
+                        ": struct '" + st.name + "' already defined");
+                }
+            }
+            
+            // Note: We don't merge cbuffers from includes, only structs
+            // This matches standard C preprocessor behavior for includes
+        }
+        catch (const std::exception& e)
+        {
+            throw std::runtime_error(
+                filePath + ":" + std::to_string(hashLine) + 
+                ": error processing include '" + includeFile + "': " + e.what());
+        }
+    }
+
     void parse()
     {
         while (!check(TokKind::Eof))
         {
+            // Handle #include directives
+            if (cur.kind == TokKind::Hash)
+            {
+                parseInclude();
+                continue;
+            }
+
             if (cur.kind != TokKind::Ident)
             {
                 // skip unknown top-level tokens
@@ -479,7 +604,8 @@ void ParseResult::resolvePointers()
 // Public API
 // ---------------------------------------------------------------------------
 
-ParseResult parseFile(const std::string& path)
+// Internal parse function that doesn't clear the include set
+static ParseResult parseFileInternal(const std::string& path)
 {
     logMsg("[parser] Opening file: %s\n", path.c_str());
     
@@ -507,4 +633,40 @@ ParseResult parseFile(const std::string& path)
            result.structs.size(), result.cbuffers.size());
 
     return result;
+}
+
+ParseResult parseFile(const std::string& path)
+{
+    // Clear the include set for top-level parse
+    bool wasEmpty = g_includedFiles.empty();
+    if (wasEmpty)
+    {
+        g_includedFiles.clear();
+    }
+
+    try
+    {
+        // Get the absolute path for the main file
+        std::string absPath = fs::absolute(path).string();
+        g_includedFiles.insert(absPath);
+        
+        ParseResult result = parseFileInternal(path);
+        
+        // Clear includes on successful completion (only if this was a top-level call)
+        if (wasEmpty)
+        {
+            g_includedFiles.clear();
+        }
+        
+        return result;
+    }
+    catch (const std::exception& e)
+    {
+        // Clear includes on error (only if this was a top-level call)
+        if (wasEmpty)
+        {
+            g_includedFiles.clear();
+        }
+        throw;
+    }
 }

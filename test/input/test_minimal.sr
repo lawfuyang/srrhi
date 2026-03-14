@@ -1,0 +1,6 @@
+// 5. Minimal + modern style (very common in tiny demos / compute)
+cbuffer cb
+{
+    float4x4 g_mvp;
+    float    g_time;
+};

@@ -1,0 +1,9 @@
+// Main file that includes another .sr file
+#include "test_include_base.sr"
+
+cbuffer ObjectData
+{
+    Transform g_Transform;
+    Material  g_Material;
+    float     g_Time;
+};

@@ -1,0 +1,11 @@
+cbuffer PerFrame
+{
+    float4x4    WorldViewProjection;
+    float4x4    View;
+    float4x4    Projection;
+    float3      CameraPosition;
+    float       Time;
+    float4      FogColorAndDensity;
+    float       NearPlane;
+    float       FarPlane;
+};

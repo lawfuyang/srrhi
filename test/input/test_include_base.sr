@@ -1,0 +1,14 @@
+// Base struct definitions for include testing
+struct Transform
+{
+    float4x4 matrix;
+    float3   position;
+};
+
+struct Material
+{
+    float3  albedo;
+    float   roughness;
+    float3  normal;
+    float   metallic;
+};

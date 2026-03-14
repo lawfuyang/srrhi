@@ -1,0 +1,5 @@
+cbuffer ExampleArrays { 
+   float2 before;
+   float array[2];
+   float2 after;
+};

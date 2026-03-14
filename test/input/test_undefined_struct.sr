@@ -1,0 +1,10 @@
+// Test with undefined struct reference (should fail)
+struct MyStruct {
+    float x, y;
+};
+
+cbuffer mixed_cb
+{
+    MyStruct data;          // Valid: MyStruct is declared above
+    UndefinedStruct bad;    // Invalid: UndefinedStruct not declared
+};

@@ -1,0 +1,21 @@
+// 4. With semantic names + comments + mixed layout
+cbuffer SceneConstants
+{
+    /* Camera matrices */
+    float4x4 g_mView;
+    float4x4 g_mProj;
+    float4x4 g_mViewProj;
+    float4x4 g_mInvViewProj;
+
+    float3  g_CameraPosWS;
+    float   g_Exposure;
+
+    /* Fog / atmosphere */
+    float4  g_FogParams;        // x = start, y = end, z = density, w = height falloff
+    float4  g_FogColor;
+
+    /* Misc */
+    uint    g_FrameNumber;
+    float   g_DeltaTime;
+    float   pad0[2];            // explicit padding test
+};

@@ -1,0 +1,7 @@
+cbuffer LightingConstants 
+{
+    float4 LightData[8];        // position or direction + type/radius/etc packed
+    float4 ShadowCascadeSplits;
+    int    ActiveLightCount;
+    uint   FrameIndex;
+};

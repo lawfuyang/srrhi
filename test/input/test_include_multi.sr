@@ -1,0 +1,10 @@
+// File with multiple includes
+#include "test_include_nested_b.sr"
+#include "test_include_base.sr"
+
+cbuffer ComplexScene
+{
+    Scene       g_Scene;
+    Transform   g_CameraTransform;
+    Material    g_DefaultMaterial;
+};

@@ -1,0 +1,13 @@
+// Test with valid struct reference (should succeed)
+struct ValidStruct {
+    float x;
+    float y;
+    int count;
+};
+
+cbuffer valid_cb
+{
+    ValidStruct data;
+    float extra;
+    ValidStruct array[5];
+};

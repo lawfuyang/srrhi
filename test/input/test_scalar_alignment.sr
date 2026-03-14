@@ -1,0 +1,7 @@
+cbuffer ExampleScalarAlignment { 
+   uint16_t smol;
+   float f1;
+   float f2;
+   double lorg;
+   bool four_bytes;
+};

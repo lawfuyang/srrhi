@@ -1,0 +1,16 @@
+struct Test {
+    float a, b;
+};
+
+cbuffer example {
+    Test test[2];
+    float Val1;
+    float2 Val2[3][2];
+    float Val3;
+    double d;
+    float3x4 mat;
+    float f;
+    matrix<int,1,2> mat2;
+    vector<double,1> dv;
+    uint16_t u;
+};

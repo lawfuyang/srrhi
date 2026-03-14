@@ -1,0 +1,6 @@
+// Test file with unrecognized type (should fail with clear error)
+cbuffer invalid_cb
+{
+    UnknownType value;
+    float valid_field;
+};

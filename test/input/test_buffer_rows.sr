@@ -1,0 +1,6 @@
+cbuffer ExampleBufferRows { 
+   float3 position;
+   float3 normal;
+   uint index;
+   double4 d;
+};

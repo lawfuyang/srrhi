@@ -1,0 +1,8 @@
+// First level nested include
+struct Light
+{
+    float3  position;
+    float   intensity;
+    float3  color;
+    float   range;
+};
