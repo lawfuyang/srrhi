@@ -338,8 +338,19 @@ struct Parser
             int         typeLine = cur.line;
             advance();
 
-            // Named struct reference?
-            bool isStructRef = !isHlslTypeName(typeName) && structMap.count(typeName);
+            // Validate that the type is either a native HLSL type or a declared struct
+            bool isHlslType = isHlslTypeName(typeName);
+            bool isStructRef = !isHlslType && structMap.count(typeName);
+            
+            if (!isHlslType && !isStructRef)
+            {
+                throw std::runtime_error(
+                    filePath + ":" + std::to_string(typeLine) +
+                    ": unrecognized type '" + typeName + "'; it must be either a native HLSL type "
+                    "(bool, float, double, int, uint, half, int16_t, uint16_t, and their vector/matrix forms) "
+                    "or a struct that has been declared in a visible scope");
+            }
+            
             // matrix<> or vector<> need angle-bracket parsing handled specially:
             // isHlslTypeName already marks "matrix"/"vector" as known
 
