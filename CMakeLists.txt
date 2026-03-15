@@ -82,8 +82,9 @@ set(DXC_VERSION "v1.9.2602")
 set(DXC_URL "https://github.com/microsoft/DirectXShaderCompiler/releases/download/${DXC_VERSION}/dxc_2026_02_20.zip")
 download_library("dxc" "${DXC_VERSION}" "${DXC_URL}" "dxc_*")
 set(DXC_INSTALL_DIR "${CMAKE_SOURCE_DIR}/external/dxc")
-set(DXC_EXE "${DXC_INSTALL_DIR}/bin/x64/dxc.exe")
-file(CREATE_LINK "${DXC_EXE}" "${CMAKE_SOURCE_DIR}/bin/dxc.exe" SYMBOLIC)
+file(CREATE_LINK "${DXC_INSTALL_DIR}/bin/x64/dxc.exe" "${CMAKE_SOURCE_DIR}/bin/dxc.exe" SYMBOLIC)
+file(CREATE_LINK "${DXC_INSTALL_DIR}/bin/x64/dxcompiler.dll" "${CMAKE_SOURCE_DIR}/bin/dxcompiler.dll" SYMBOLIC)
+file(CREATE_LINK "${DXC_INSTALL_DIR}/bin/x64/dxil.dll" "${CMAKE_SOURCE_DIR}/bin/dxil.dll" SYMBOLIC)
 
 file(GLOB_RECURSE SOURCES 
     "src/*.cpp"
@@ -92,3 +93,6 @@ file(GLOB_RECURSE SOURCES
 )
 
 add_executable(${PROJECT_NAME} ${SOURCES})
+
+target_include_directories(${PROJECT_NAME} PRIVATE "${DXC_INSTALL_DIR}/inc")
+target_link_libraries(${PROJECT_NAME} PRIVATE "${DXC_INSTALL_DIR}/lib/x64/dxcompiler.lib" "${DXC_INSTALL_DIR}/lib/x64/dxil.lib")
