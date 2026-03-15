@@ -1,0 +1,16 @@
+// Test setters with various C++ type mappings:
+// scalar, vector, matrix types in a single srinput scope.
+cbuffer TypedBuffer
+{
+    float       scalarFloat;
+    uint        scalarUint;
+    float3      vec3;
+    float4      vec4;
+    float4x4    mat4x4;
+    int2        ivec2;
+};
+
+srinput RendererInputs
+{
+    TypedBuffer buffer;
+};

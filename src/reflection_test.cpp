@@ -92,6 +92,46 @@ static bool IsGeneratedPadding(const std::string& name,
 }
 
 // ---------------------------------------------------------------------------
+// Name-cleaning helper: strip common HLSL member prefixes (m_, g_, s_) and
+// capitalize the first letter.  Matches the logic in hlsl_gen.cpp.
+// ---------------------------------------------------------------------------
+static std::string RtCleanMemberName(const std::string& name)
+{
+    const char* prefixes[] = {"m_", "g_", "s_"};
+    std::string r = name;
+    for (auto* p : prefixes)
+    {
+        size_t plen = std::strlen(p);
+        if (r.size() > plen && r.substr(0, plen) == p)
+        {
+            r = r.substr(plen);
+            break;
+        }
+    }
+    if (!r.empty())
+        r[0] = (char)std::toupper((unsigned char)r[0]);
+    return r;
+}
+
+// Build mapping: cbuffer type name → HLSL variable name (e.g. "SceneConstants" → "MainInputs_Scene")
+// Only cbuffers that are members of an srinput scope appear in the generated HLSL.
+static std::unordered_map<std::string, std::string> BuildCbufVarNameMap(
+    const ParseResult& pr)
+{
+    std::unordered_map<std::string, std::string> map;
+    for (const auto& srInputDef : pr.m_SrInputDefs)
+    {
+        for (const auto& member : srInputDef.m_Members)
+        {
+            std::string cleanedMemberName = RtCleanMemberName(member.m_MemberName);
+            std::string varName = srInputDef.m_Name + "_" + cleanedMemberName;
+            map[member.m_CBufferName] = varName;
+        }
+    }
+    return map;
+}
+
+// ---------------------------------------------------------------------------
 // Build a minimal HLSL shader body that reads from each cbuffer so DXC keeps
 // them in the resource binding table and includes them in reflection.
 //
@@ -101,8 +141,10 @@ static bool IsGeneratedPadding(const std::string& name,
 // The shader writes the result to a volatile local so the read cannot be
 // optimised away even without -Od.
 // ---------------------------------------------------------------------------
-static std::string BuildDummyEntryPoint(const std::vector<LayoutMember>& layouts,
-                                         const ParseResult&                 pr)
+static std::string BuildDummyEntryPoint(
+    const std::vector<LayoutMember>& layouts,
+    const ParseResult&               pr,
+    const std::unordered_map<std::string, std::string>& cbufVarNames)
 {
     std::ostringstream body;
     body << "[numthreads(1,1,1)]\n"
@@ -115,11 +157,17 @@ static std::string BuildDummyEntryPoint(const std::vector<LayoutMember>& layouts
         const auto& cbLayout = layouts[li];
         if (cbLayout.m_Submembers.empty()) continue;
 
+        // Resolve the HLSL variable name for this cbuffer.
+        // For srinput cbuffers: {SrInputName}_{CleanedMemberName}
+        auto it = cbufVarNames.find(cbLayout.m_Name);
+        std::string varPrefix = (it != cbufVarNames.end())
+            ? it->second
+            : ("m_" + cbLayout.m_Name); // fallback for non-srinput cbuffers
+
         // Find the first scalar or vector member (matrices and arrays need [idx])
-        // Access it through the struct member: m_<StructName>.<fieldName>
         for (const auto& m : cbLayout.m_Submembers)
         {
-            std::string fieldAccess = "m_" + cbLayout.m_Name + "." + m.m_Name;
+            std::string fieldAccess = varPrefix + "." + m.m_Name;
 
             if (std::holds_alternative<BuiltinType>(m.m_Type))
             {
@@ -307,7 +355,8 @@ static std::vector<ReflectedCBuffer> CompileAndReflect(
 static bool CompareWithReflection(
     const std::vector<LayoutMember>&     layouts,
     const std::vector<ReflectedCBuffer>& reflected,
-    std::ostringstream&                  report)
+    std::ostringstream&                  report,
+    const std::unordered_map<std::string, std::string>& cbufVarNames)
 {
     bool ok = true;
 
@@ -345,9 +394,12 @@ static bool CompareWithReflection(
         }
 
         // --- Check struct member wrapper ---
-        // With the new HLSL generation, the cbuffer contains a single struct member
-        // named m_<StructName> instead of inlining members.
-        std::string expectedStructMember = "m_" + cbName;
+        // The HLSL cbuffer contains a single struct member named
+        // {SrInputName}_{CleanedMemberName} (e.g. "MainInputs_Scene").
+        auto it = cbufVarNames.find(cbName);
+        std::string expectedStructMember = (it != cbufVarNames.end())
+            ? it->second
+            : ("m_" + cbName); // fallback for non-srinput cbuffers
         
         // Check if the expected struct member exists in DXC reflection
         bool foundStructMember = false;
@@ -384,100 +436,7 @@ static bool CompareWithReflection(
     return ok;
 }
 
-// ---------------------------------------------------------------------------
-// Export reflection data to JSON for use by validation generators.
-// This allows generated C++ tests to validate offsets against DXC reflection.
-// Includes both DXC-reflected wrapper struct info and computed layout info.
-// ---------------------------------------------------------------------------
-static void ExportReflectionDataJson(
-    const fs::path&                           outputPath,
-    const std::string&                        srFileName,
-    const std::vector<LayoutMember>&          layouts,
-    const std::vector<ReflectedCBuffer>&      reflected)
-{
-    std::ofstream out(outputPath, std::ios::app);
-    if (!out.is_open())
-        throw std::runtime_error("Failed to open reflection export file: " + outputPath.string());
 
-    // Export as JSON (manually constructed for simplicity)
-    
-    static bool first = true;
-    if (first)
-    {
-        out << "[\n";
-        first = false;
-    }
-    else
-    {
-        out << ",\n";
-    }
-
-    out << "  {\n"
-        << "    \"file\": \"" << srFileName << "\",\n"
-        << "    \"computedLayouts\": [\n";
-
-    // Export computed layout information
-    bool firstLayout = true;
-    for (const auto& layout : layouts)
-    {
-        if (!firstLayout) out << ",\n";
-        out << "      {\n"
-            << "        \"name\": \"" << layout.m_Name << "\",\n"
-            << "        \"totalSize\": " << layout.m_Size << ",\n"
-            << "        \"members\": [\n";
-
-        bool firstMember = true;
-        for (const auto& member : layout.m_Submembers)
-        {
-            if (!firstMember) out << ",\n";
-            out << "          {\n"
-                << "            \"name\": \"" << member.m_Name << "\",\n"
-                << "            \"offset\": " << member.m_Offset << ",\n"
-                << "            \"size\": " << member.m_Size << "\n"
-                << "          }";
-            firstMember = false;
-        }
-
-        out << "\n        ]\n"
-            << "      }";
-        firstLayout = false;
-    }
-
-    out << "\n    ],\n"
-        << "    \"dxcReflection\": [\n";
-
-    // Export DXC reflection information
-    bool firstCb = true;
-    for (const auto& rcb : reflected)
-    {
-        if (!firstCb) out << ",\n";
-        out << "      {\n"
-            << "        \"name\": \"" << rcb.m_Name << "\",\n"
-            << "        \"totalSize\": " << rcb.m_TotalSize << ",\n"
-            << "        \"vars\": [\n";
-
-        bool firstVar = true;
-        for (const auto& rv : rcb.m_Vars)
-        {
-            if (!firstVar) out << ",\n";
-            out << "          {\n"
-                << "            \"name\": \"" << rv.m_Name << "\",\n"
-                << "            \"offset\": " << rv.m_Offset << ",\n"
-                << "            \"size\": " << rv.m_Size << "\n"
-                << "          }";
-            firstVar = false;
-        }
-
-        out << "\n        ]\n"
-            << "      }";
-        firstCb = false;
-    }
-
-    out << "\n    ]\n"
-        << "  }";
-    
-    out.flush();
-}
 
 // ---------------------------------------------------------------------------
 // Public entry point
@@ -499,16 +458,7 @@ int RunReflectionTests(const fs::path& testInputDir)
     if (FAILED(hr))
         throw std::runtime_error("Failed to create IDxcCompiler3");
 
-    // ---- Prepare reflection export file ------------------------------------
-    fs::path outputDir = testInputDir.parent_path() / "output" / "cpp";
-    fs::create_directories(outputDir);
-    fs::path reflectionExportPath = outputDir / "reflection_data.json";
-    
-    // Write opening bracket
-    {
-        std::ofstream out(reflectionExportPath);
-        out.close();  // Clear the file
-    }
+
 
     // ---- Collect .sr files -------------------------------------------------
     std::vector<fs::path> srFiles;
@@ -604,9 +554,13 @@ int RunReflectionTests(const fs::path& testInputDir)
             continue;
         }
 
+        // Build the mapping from cbuffer type name → HLSL variable name.
+        // This must match what GenerateHlsl() emits for srinput cbuffers.
+        auto cbufVarNames = BuildCbufVarNameMap(pr);
+
         // Append a compute-shader entry point that reads from each cbuffer so
         // DXC preserves them in the shader reflection.
-        std::string hlslFull = hlslBase + "\n" + BuildDummyEntryPoint(layouts, pr);
+        std::string hlslFull = hlslBase + "\n" + BuildDummyEntryPoint(layouts, pr, cbufVarNames);
 
         // ---- Build the set of "real" member names for padding detection ----
         // This covers all top-level submembers across all cbuffers.
@@ -642,23 +596,13 @@ int RunReflectionTests(const fs::path& testInputDir)
 
         // ---- Compare -------------------------------------------------------
         std::ostringstream report;
-        bool               ok = CompareWithReflection(layouts, reflected, report);
+        bool               ok = CompareWithReflection(layouts, reflected, report, cbufVarNames);
 
         if (ok)
         {
             LogMsg("[test]   PASS\n");
             LogMsg("%s", report.str().c_str());
             ++passed;
-            
-            // Export reflection data for validation generators
-            try
-            {
-                ExportReflectionDataJson(reflectionExportPath, srFile.filename().string(), layouts, reflected);
-            }
-            catch (const std::exception& e)
-            {
-                LogMsg("[test]   WARNING: Failed to export reflection data: %s\n", e.what());
-            }
         }
         else
         {
@@ -671,14 +615,6 @@ int RunReflectionTests(const fs::path& testInputDir)
     LogMsg("\n[test] ==========================================\n");
     LogMsg("[test] Results: %d passed, %d failed, %d skipped\n",
            passed, failed, skipped);
-    
-    // ---- Finalize reflection export ----------------------------------------
-    {
-        std::ofstream out(reflectionExportPath, std::ios::app);
-        out << "\n]\n";
-        out.close();
-        LogMsg("[test] Reflection data exported to: %s\n", reflectionExportPath.string().c_str());
-    }
 
     return (failed == 0) ? 0 : 1;
 }

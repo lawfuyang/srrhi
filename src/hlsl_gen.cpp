@@ -4,6 +4,35 @@
 #include <cctype>
 #include <unordered_map>
 #include <unordered_set>
+#include <cstring>
+
+// ---------------------------------------------------------------------------
+// Name-cleaning helpers (same logic as cpp_gen.cpp)
+// ---------------------------------------------------------------------------
+static std::string HlslStripCommonPrefixes(const std::string& name)
+{
+    const char* prefixes[] = {"m_", "g_", "s_"};
+    for (auto* p : prefixes)
+    {
+        size_t plen = std::strlen(p);
+        if (name.size() > plen && name.substr(0, plen) == p)
+            return name.substr(plen);
+    }
+    return name;
+}
+
+static std::string HlslCapitalizeFirst(const std::string& s)
+{
+    if (s.empty()) return s;
+    std::string r = s;
+    r[0] = (char)std::toupper((unsigned char)r[0]);
+    return r;
+}
+
+static std::string HlslCleanMemberName(const std::string& name)
+{
+    return HlslCapitalizeFirst(HlslStripCommonPrefixes(name));
+}
 
 // ---------------------------------------------------------------------------
 // HLSL type name reconstruction from TypeRef
@@ -151,41 +180,21 @@ static void EmitStructHlsl(std::ostringstream& out, const StructType& st,
 }
 
 // ---------------------------------------------------------------------------
-// Emit cbuffer (HLSL)
-// registerNum = -1 means no register binding
-// Now the cbuffer contains a struct member instead of inlining all members
-// ---------------------------------------------------------------------------
-static void EmitCBufferHlsl(std::ostringstream& out,
-                             const StructType& bufferStruct,
-                             const LayoutMember& layout,
-                             int& padCount,
-                             int registerNum = -1)
-{
-    if (registerNum < 0)
-        out << "cbuffer " << bufferStruct.m_Name << "\n{\n";
-    else
-        out << "cbuffer " << bufferStruct.m_Name << " : register(b" << registerNum << ")\n{\n";
-
-    // Emit the struct as a member instead of inlining members
-    out << "    " << bufferStruct.m_Name << " m_" << bufferStruct.m_Name << ";\n";
-
-    out << "};\n\n";
-}
-
 // ---------------------------------------------------------------------------
 // Emit wrapped cbuffer for srinput member (HLSL)
-// The cbuffer contains the struct as a member instead of inlining fields
+// varName = "{SrInputName}_{CleanedMemberName}", e.g. "MainInputs_Scene"
 // ---------------------------------------------------------------------------
 static void EmitWrappedCBufferHlsl(std::ostringstream& out,
                                    const StructType& cbufferDef,
                                    const LayoutMember& layout,
                                    int registerNum,
+                                   const std::string& varName,
                                    int& padCount)
 {
     out << "cbuffer " << cbufferDef.m_Name << " : register(b" << registerNum << ")\n{\n";
 
-    // Emit the struct as a member instead of inlining members
-    out << "    " << cbufferDef.m_Name << " m_" << cbufferDef.m_Name << ";\n";
+    // Variable name: {SrInputName}_{CleanedMemberName}
+    out << "    " << cbufferDef.m_Name << " " << varName << ";\n";
 
     out << "};\n\n";
 }
@@ -213,45 +222,47 @@ std::string GenerateHlsl(const ParseResult& pr,
     // Build a set of cbuffer names that are in srinput scopes
     std::unordered_set<std::string> cbuffersInSrInput;
     for (const auto& srInputDef : pr.m_SrInputDefs)
-    {
         for (const auto& member : srInputDef.m_Members)
-        {
             cbuffersInSrInput.insert(member.m_CBufferName);
-        }
-    }
 
     // Emit cbuffer definitions as structs (only for those in srinput scopes)
-    std::vector<std::string> cbuffersInSrInputVec(cbuffersInSrInput.begin(), 
-                                                   cbuffersInSrInput.end());
     LogMsg("[hlsl_gen]   Emitting %zu cbuffer definition(s) as struct(s)...\n",
-           cbuffersInSrInputVec.size());
+           cbuffersInSrInput.size());
     for (const auto& bufDef : pr.m_BufferDefs)
     {
         if (cbuffersInSrInput.count(bufDef.m_Name))
         {
-            // Find the corresponding layout to include padding
             const LayoutMember* bufLayout = nullptr;
             for (const auto& lm : layouts)
             {
-                if (lm.m_Name == bufDef.m_Name)
-                {
-                    bufLayout = &lm;
-                    break;
-                }
+                if (lm.m_Name == bufDef.m_Name) { bufLayout = &lm; break; }
             }
             int localPadCount = 0;
             EmitStructHlsl(out, bufDef, localPadCount, 0, bufLayout);
         }
     }
 
-    // Emit cbuffers that are in srinput scopes
-    // Register numbers are allocated globally across all srinput scopes
+    // Emit cbuffers that are in srinput scopes.
+    // Register numbers are allocated globally across all srinput scopes.
+    // Track per-srinput cbuffer info for namespace getter emission.
+    struct CbufInfo
+    {
+        std::string m_SrInputName;
+        std::string m_CleanedMemberName; // e.g. "Scene", "FrameConsts"
+        std::string m_VarName;           // e.g. "MainInputs_Scene"
+        std::string m_TypeName;          // e.g. "SceneConstants"
+    };
+    std::vector<CbufInfo> allCbufInfos;
+
     LogMsg("[hlsl_gen]   Emitting cbuffers with register bindings...\n");
-    int globalRegisterNum = 0;
+    int globalRegNum = 0;
     for (const auto& srInputDef : pr.m_SrInputDefs)
     {
         for (const auto& member : srInputDef.m_Members)
         {
+            const std::string cleanedMemberName = HlslCleanMemberName(member.m_MemberName);
+            const std::string varName = srInputDef.m_Name + "_" + cleanedMemberName;
+
             // Find the cbuffer definition
             StructType* bufDef = nullptr;
             for (const auto& bd : pr.m_BufferDefs)
@@ -265,7 +276,6 @@ std::string GenerateHlsl(const ParseResult& pr,
 
             if (bufDef)
             {
-                // Find the corresponding layout
                 const LayoutMember* correspondingLayout = nullptr;
                 for (const auto& lm : layouts)
                 {
@@ -279,13 +289,29 @@ std::string GenerateHlsl(const ParseResult& pr,
                 if (correspondingLayout)
                 {
                     int localPadCount = 0;
-                    EmitWrappedCBufferHlsl(out, *bufDef, *correspondingLayout, 
-                                          globalRegisterNum, localPadCount);
+                    EmitWrappedCBufferHlsl(out, *bufDef, *correspondingLayout,
+                                          globalRegNum, varName, localPadCount);
                 }
+
+                allCbufInfos.push_back({srInputDef.m_Name, cleanedMemberName,
+                                        varName, member.m_CBufferName});
             }
 
-            ++globalRegisterNum;
+            ++globalRegNum;
         }
+    }
+
+    // Emit per-srinput namespaces with getter functions
+    for (const auto& srInputDef : pr.m_SrInputDefs)
+    {
+        out << "namespace " << srInputDef.m_Name << "\n{\n";
+        for (const auto& info : allCbufInfos)
+        {
+            if (info.m_SrInputName != srInputDef.m_Name) continue;
+            out << "    " << info.m_TypeName << " Get" << info.m_CleanedMemberName
+                << "() { return " << info.m_VarName << "; }\n";
+        }
+        out << "}\n\n";
     }
 
     LogMsg("[hlsl_gen] Done (padCount=%d)\n", padCount);

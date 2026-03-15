@@ -1,0 +1,14 @@
+// Test prefix stripping: m_, g_, s_ prefixes should be removed
+// and the first letter capitalized in the generated output.
+cbuffer PrefixBuffer
+{
+    float    m_PrefixedFloat;
+    float3   g_GlobalVec;
+    uint     s_StaticCount;
+    float4x4 m_WorldMatrix;
+};
+
+srinput PrefixInputs
+{
+    PrefixBuffer m_Buffer;
+};

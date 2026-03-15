@@ -2,6 +2,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <unordered_set>
+#include <cctype>
 
 // ---------------------------------------------------------------------------
 // C++ type mapping from BuiltinType
@@ -98,6 +99,121 @@ static std::string MapMatrixType(const ArrayNode& arr, int computedSize)
     return "";
 }
 
+// ---------------------------------------------------------------------------
+// Name-cleaning helpers: strip common prefixes (m_, g_, s_) and capitalize
+// ---------------------------------------------------------------------------
+static std::string StripCommonPrefixes(const std::string& name)
+{
+    const char* prefixes[] = {"m_", "g_", "s_"};
+    for (auto* p : prefixes)
+    {
+        size_t plen = std::strlen(p);
+        if (name.size() > plen && name.substr(0, plen) == p)
+            return name.substr(plen);
+    }
+    return name;
+}
+
+static std::string CapitalizeFirst(const std::string& s)
+{
+    if (s.empty()) return s;
+    std::string r = s;
+    r[0] = (char)std::toupper((unsigned char)r[0]);
+    return r;
+}
+
+static std::string CleanMemberName(const std::string& name)
+{
+    return CapitalizeFirst(StripCommonPrefixes(name));
+}
+
+// Returns true if the C++ type should be passed by value (scalar types)
+static bool IsCppScalarPassByValue(const std::string& typeName)
+{
+    static const std::unordered_set<std::string> scalars = {
+        "float", "double", "int32_t", "uint32_t", "int16_t", "uint16_t",
+        "int64_t", "uint64_t", "BOOL", "bool"
+    };
+    return scalars.count(typeName) > 0;
+}
+
+// ---------------------------------------------------------------------------
+// SetterInfo: describes how to emit a public setter for one member
+// ---------------------------------------------------------------------------
+struct SetterInfo
+{
+    std::string m_CleanedName;    // private member name (capitalized, no prefix)
+    std::string m_CppType;        // C++ param type  (empty when byte array)
+    bool        m_bByValue        = false; // true → pass by value; false → const ref
+    bool        m_bIsByteArray    = false; // true → member is uint8_t[N]
+    int         m_ByteArraySize   = 0;
+    std::string m_StructTypeName; // set when byte array originated from a struct field
+};
+
+static std::vector<SetterInfo> CollectSetterInfos(
+    const std::vector<MemberVariable>& members,
+    const std::vector<LayoutMember>& lms)
+{
+    std::vector<SetterInfo> result;
+    for (size_t i = 0; i < members.size(); ++i)
+    {
+        const MemberVariable& mv = members[i];
+        const LayoutMember*   lm = (i < lms.size()) ? &lms[i] : nullptr;
+        if (!lm) continue;
+
+        SetterInfo si;
+        si.m_CleanedName = CleanMemberName(mv.m_Name);
+
+        if (auto* sp = std::get_if<StructType*>(&mv.m_Type))
+        {
+            si.m_bIsByteArray  = true;
+            si.m_ByteArraySize = lm->m_Size;
+            si.m_StructTypeName = (*sp)->m_Name;
+        }
+        else if (std::holds_alternative<std::shared_ptr<ArrayNode>>(lm->m_Type))
+        {
+            const ArrayNode& arr = *std::get<std::shared_ptr<ArrayNode>>(lm->m_Type);
+            if (arr.m_bCreatedFromMatrix)
+            {
+                std::string matType = MapMatrixType(arr, lm->m_Size);
+                if (!matType.empty())
+                {
+                    si.m_CppType  = matType;
+                    si.m_bByValue = false; // const ref for DirectX matrix types
+                }
+                else
+                {
+                    si.m_bIsByteArray  = true;
+                    si.m_ByteArraySize = lm->m_Size;
+                }
+            }
+            else
+            {
+                si.m_bIsByteArray  = true;
+                si.m_ByteArraySize = lm->m_Size;
+            }
+        }
+        else if (auto* bt = std::get_if<BuiltinType>(&lm->m_Type))
+        {
+            auto cti = MapBuiltinToCpp(*bt);
+            if (cti.m_ArrayMult > 0)
+            {
+                // Unusual vector fallback → treat as byte array
+                si.m_bIsByteArray  = true;
+                si.m_ByteArraySize = lm->m_Size;
+            }
+            else
+            {
+                si.m_CppType  = cti.m_TypeName;
+                si.m_bByValue = IsCppScalarPassByValue(cti.m_TypeName);
+            }
+        }
+
+        result.push_back(std::move(si));
+    }
+    return result;
+}
+
 static void EmitPadding(std::ostringstream& out, int padBytes, int& padCount,
                         const std::string& ind)
 {
@@ -122,12 +238,14 @@ static void EmitPadding(std::ostringstream& out, int padBytes, int& padCount,
 //   - Walks members paired with their layout submembers.
 //   - Array fields are EXPANDED to per-element members with stride padding.
 //   - Matrix fields (m_bCreatedFromMatrix arrays) are emitted column-by-column.
+//   - bCleanNames: strip prefixes and capitalize first letter for each member name.
 // ---------------------------------------------------------------------------
 
 static void EmitMembersCpp(std::ostringstream& out,
                             const std::vector<MemberVariable>& members,
                             const std::vector<LayoutMember>& lms,
-                            int& padCount, const std::string& ind)
+                            int& padCount, const std::string& ind,
+                            bool bCleanNames = false)
 {
     int cursor = 0;
 
@@ -141,6 +259,8 @@ static void EmitMembersCpp(std::ostringstream& out,
         if (fieldOffset > cursor)
             EmitPadding(out, fieldOffset - cursor, padCount, ind);
 
+        const std::string fieldName = bCleanNames ? CleanMemberName(mv.m_Name) : mv.m_Name;
+
         // === Struct field ===
         if (auto* sp = std::get_if<StructType*>(&mv.m_Type))
         {
@@ -151,7 +271,7 @@ static void EmitMembersCpp(std::ostringstream& out,
             // the computed size includes this padding. Using a byte array guarantees
             // the layout matches the HLSL cbuffer without relying on C++ struct alignment.
             // To initialize: create a real instance and use std::memcpy() to copy bytes.
-            out << ind << "uint8_t " << mv.m_Name << "[" << lm->m_Size << "];\n";
+            out << ind << "uint8_t " << fieldName << "[" << lm->m_Size << "];\n";
             if (lm->m_Padding > 0)
                 EmitPadding(out, lm->m_Padding, padCount, ind);
             cursor = lm->m_Offset + lm->m_Size + lm->m_Padding;
@@ -175,7 +295,7 @@ static void EmitMembersCpp(std::ostringstream& out,
                 if (!matrixType.empty())
                 {
                     // Use DirectX matrix type directly
-                    out << ind << matrixType << " " << mv.m_Name << ";\n";
+                    out << ind << matrixType << " " << fieldName << ";\n";
                     if (lm->m_Padding > 0)
                         EmitPadding(out, lm->m_Padding, padCount, ind);
                     cursor = lm->m_Offset + lm->m_Size + lm->m_Padding;
@@ -186,7 +306,7 @@ static void EmitMembersCpp(std::ostringstream& out,
                     // Non-standard matrix dimensions (e.g., 60-byte matrices) don't map to
                     // DirectX::XMFLOAT types. This byte array ensures the layout matches exactly.
                     // To initialize: create a real matrix type and use std::memcpy() to copy bytes.
-                    out << ind << "uint8_t " << mv.m_Name << "[" << lm->m_Size << "];  // std140 matrix padding\n";
+                    out << ind << "uint8_t " << fieldName << "[" << lm->m_Size << "];  // std140 matrix padding\n";
                     if (lm->m_Padding > 0)
                         EmitPadding(out, lm->m_Padding, padCount, ind);
                     cursor = lm->m_Offset + lm->m_Size + lm->m_Padding;
@@ -199,7 +319,7 @@ static void EmitMembersCpp(std::ostringstream& out,
                 // For example, a float[4] takes 64 bytes (each element at 16-byte boundary),
                 // not 16 bytes. Using a byte array preserves the exact computed layout.
                 // To initialize: create a real array and use std::memcpy() to copy bytes.
-                out << ind << "uint8_t " << mv.m_Name << "[" << lm->m_Size << "];  // std140 array padding\n";
+                out << ind << "uint8_t " << fieldName << "[" << lm->m_Size << "];  // std140 array padding\n";
                 if (lm->m_Padding > 0)
                     EmitPadding(out, lm->m_Padding, padCount, ind);
                 cursor = lm->m_Offset + lm->m_Size + lm->m_Padding;
@@ -212,7 +332,7 @@ static void EmitMembersCpp(std::ostringstream& out,
             if (bt)
             {
                 auto cti = MapBuiltinToCpp(*bt);
-                out << ind << cti.m_TypeName << " " << mv.m_Name;
+                out << ind << cti.m_TypeName << " " << fieldName;
                 if (cti.m_ArrayMult > 0) out << "[" << cti.m_ArrayMult << "]";
                 out << ";\n";
             }
@@ -221,6 +341,81 @@ static void EmitMembersCpp(std::ostringstream& out,
             cursor = lm->m_Offset + lm->m_Size + lm->m_Padding;
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Emit a cbuffer struct as a C++ class with private members + public setters
+// ---------------------------------------------------------------------------
+static void EmitClassCpp(std::ostringstream& out, const StructType& st,
+                          const LayoutMember& layout, int& padCount)
+{
+    // Collect setter infos before emitting (determines parameter types)
+    auto setterInfos = CollectSetterInfos(st.m_Members, layout.m_Submembers);
+
+    bool bNeedsMemcpy = false;
+    for (const auto& si : setterInfos)
+        if (si.m_bIsByteArray) { bNeedsMemcpy = true; break; }
+
+    out << "class alignas(16) " << st.m_Name << "\n{\nfriend struct " << st.m_Name
+        << "Validator;\nprivate:\n";
+
+    int localPadCount = padCount;
+    EmitMembersCpp(out, st.m_Members, layout.m_Submembers, localPadCount, "    ",
+                   /*bCleanNames=*/true);
+
+    out << "\npublic:\n";
+
+    for (const auto& si : setterInfos)
+    {
+        const std::string setterName = "Set" + si.m_CleanedName;
+
+        if (si.m_bIsByteArray)
+        {
+            if (!si.m_StructTypeName.empty())
+            {
+                // Struct field → take const ref of the original struct type.
+                // Use global scope (::) to avoid ambiguity when the private member
+                // and the type share the same cleaned name (e.g. member "Transform"
+                // would shadow the type "Transform" inside the class body).
+                out << "    void " << setterName << "(const ::" << si.m_StructTypeName << "& value)"
+                    << " { std::memcpy(" << si.m_CleanedName << ", &value, "
+                    << si.m_ByteArraySize << "); }\n";
+            }
+            else
+            {
+                // Array/matrix byte array → raw pointer
+                out << "    void " << setterName << "(const void* pData)"
+                    << " { std::memcpy(" << si.m_CleanedName << ", pData, "
+                    << si.m_ByteArraySize << "); }\n";
+            }
+        }
+        else if (si.m_bByValue)
+        {
+            out << "    void " << setterName << "(" << si.m_CppType << " value)"
+                << " { " << si.m_CleanedName << " = value; }\n";
+        }
+        else
+        {
+            out << "    void " << setterName << "(const " << si.m_CppType << "& value)"
+                << " { " << si.m_CleanedName << " = value; }\n";
+        }
+    }
+
+    out << "};\n\n";
+    out << "// Friend validator struct for compile-time offset validation\n";
+    out << "struct " << st.m_Name << "Validator {\n";
+    
+    // Emit offsetof static_asserts directly in the struct body
+    // (they have friend access because this struct is befriended by the class above)
+    for (const auto& localMem : layout.m_Submembers)
+    {
+        out << "    static_assert(offsetof(" << st.m_Name << ", " << CleanMemberName(localMem.m_Name) 
+            << ") == " << localMem.m_Offset << ", \""
+            << st.m_Name << "::" << CleanMemberName(localMem.m_Name) << " offset check\");\n";
+    }
+    
+    out << "};\n\n";
+    (void)bNeedsMemcpy; // <cstring> included unconditionally when classes exist
 }
 
 // ---------------------------------------------------------------------------
@@ -297,9 +492,15 @@ std::string GenerateCpp(const ParseResult& pr,
     std::ostringstream out;
     out << "// Auto-generated by srrhi. Do not edit.\n";
     out << "#pragma once\n";
-    out << "#include <cstdint>\n\n";
+    out << "#include <cstdint>\n";
 
-    // Named struct definitions
+    // Include <cstring> for std::memcpy used in byte-array setters
+    if (!pr.m_SrInputDefs.empty())
+        out << "#include <cstring>\n";
+
+    out << "\n";
+
+    // Named struct definitions (remain as plain structs)
     for (const auto& st : pr.m_Structs)
     {
         int localPadCount = 0;
@@ -309,19 +510,15 @@ std::string GenerateCpp(const ParseResult& pr,
     // Build a set of cbuffer names that are in srinput scopes
     std::unordered_set<std::string> cbuffersInSrInput;
     for (const auto& srInputDef : pr.m_SrInputDefs)
-    {
         for (const auto& member : srInputDef.m_Members)
-        {
             cbuffersInSrInput.insert(member.m_CBufferName);
-        }
-    }
 
-    // Emit cbuffer structs (only for those in srinput scopes)
+    // Emit cbuffer structs as classes with private members + public setters
+    // (only for those referenced in srinput scopes)
     for (const auto& bufDef : pr.m_BufferDefs)
     {
         if (cbuffersInSrInput.count(bufDef.m_Name))
         {
-            // Find the corresponding layout to include padding
             const LayoutMember* bufLayout = nullptr;
             for (const auto& lm : layouts)
             {
@@ -335,11 +532,28 @@ std::string GenerateCpp(const ParseResult& pr,
             if (bufLayout)
             {
                 int localPadCount = 0;
-                out << "struct alignas(16) " << bufDef.m_Name << "\n{\n";
-                EmitMembersCpp(out, bufDef.m_Members, bufLayout->m_Submembers, localPadCount, "    ");
-                out << "};\n\n";
+                EmitClassCpp(out, bufDef, *bufLayout, localPadCount);
             }
         }
+    }
+
+    // Emit per-srinput namespaces with NumCBuffers + per-cbuffer register index constants
+    // Register numbers are assigned globally across all srinput scopes in definition order.
+    int globalRegNum = 0;
+    for (const auto& srInputDef : pr.m_SrInputDefs)
+    {
+        out << "namespace " << srInputDef.m_Name << "\n{\n";
+        out << "    static constexpr uint32_t NumCBuffers = "
+            << srInputDef.m_Members.size() << ";\n";
+
+        for (const auto& member : srInputDef.m_Members)
+        {
+            const std::string constName = CleanMemberName(member.m_MemberName) + "RegisterIndex";
+            out << "    static constexpr uint32_t " << constName << " = "
+                << globalRegNum++ << ";\n";
+        }
+
+        out << "}\n\n";
     }
 
     LogMsg("[cpp_gen] Done\n");

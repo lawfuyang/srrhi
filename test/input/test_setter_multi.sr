@@ -1,0 +1,33 @@
+// Test multiple cbuffers in one srinput and multiple srinput scopes.
+// Verifies NumCBuffers and per-buffer RegisterIndex constants.
+cbuffer PerFrameData
+{
+    float  time;
+    float  deltaTime;
+    uint   frameIndex;
+};
+
+cbuffer PerCameraData
+{
+    float4x4 viewMatrix;
+    float4x4 projMatrix;
+    float3   cameraPos;
+};
+
+cbuffer PerObjectData
+{
+    float4x4 worldMatrix;
+    float3   objectColor;
+    float    roughness;
+};
+
+srinput SceneInputs
+{
+    PerFrameData  frame;
+    PerCameraData camera;
+};
+
+srinput ObjectInputs
+{
+    PerObjectData object;
+};
