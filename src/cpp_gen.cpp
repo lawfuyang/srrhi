@@ -349,10 +349,8 @@ static void EmitClassCpp(std::ostringstream& out, const StructType& st,
             if (!si.m_StructTypeName.empty())
             {
                 // Struct field → take const ref of the original struct type.
-                // Use global scope (::) to avoid ambiguity when the private member
-                // and the type share the same cleaned name (e.g. member "Transform"
-                // would shadow the type "Transform" inside the class body).
-                out << "    void " << setterName << "(const ::" << si.m_StructTypeName << "& value)"
+                // Use srrhi scope to correctly reference types in the namespace.
+                out << "    void " << setterName << "(const srrhi::" << si.m_StructTypeName << "& value)"
                     << " { std::memcpy(" << si.m_CleanedName << ", &value, "
                     << si.m_ByteArraySize << "); }\n";
             }
@@ -474,6 +472,7 @@ std::string GenerateCpp(const ParseResult& pr,
         out << "#include <cstring>\n";
 
     out << "\n";
+    out << "namespace srrhi\n{\n\n";
 
     // Named struct definitions (remain as plain structs)
     for (const auto& st : pr.m_Structs)
@@ -530,6 +529,8 @@ std::string GenerateCpp(const ParseResult& pr,
 
         out << "}\n\n";
     }
+
+    out << "\n}  // namespace srrhi\n";
 
     LogMsg("[cpp_gen] Done\n");
     return out.str();

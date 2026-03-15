@@ -17,6 +17,8 @@
 #include "test_setter_prefix.h"
 #include "test_setter_multi.h"
 
+using namespace srrhi;
+
 // =============================================================================
 // COMPILE-TIME VALIDATION: namespace constants exist and have correct values
 // =============================================================================
