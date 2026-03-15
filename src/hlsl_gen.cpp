@@ -1,4 +1,5 @@
 ﻿#include "types.h"
+#include "common.h"
 #include <sstream>
 #include <stdexcept>
 #include <cctype>
@@ -6,33 +7,7 @@
 #include <unordered_set>
 #include <cstring>
 
-// ---------------------------------------------------------------------------
-// Name-cleaning helpers (same logic as cpp_gen.cpp)
-// ---------------------------------------------------------------------------
-static std::string HlslStripCommonPrefixes(const std::string& name)
-{
-    const char* prefixes[] = {"m_", "g_", "s_"};
-    for (auto* p : prefixes)
-    {
-        size_t plen = std::strlen(p);
-        if (name.size() > plen && name.substr(0, plen) == p)
-            return name.substr(plen);
-    }
-    return name;
-}
 
-static std::string HlslCapitalizeFirst(const std::string& s)
-{
-    if (s.empty()) return s;
-    std::string r = s;
-    r[0] = (char)std::toupper((unsigned char)r[0]);
-    return r;
-}
-
-static std::string HlslCleanMemberName(const std::string& name)
-{
-    return HlslCapitalizeFirst(HlslStripCommonPrefixes(name));
-}
 
 // ---------------------------------------------------------------------------
 // HLSL type name reconstruction from TypeRef
@@ -260,7 +235,7 @@ std::string GenerateHlsl(const ParseResult& pr,
     {
         for (const auto& member : srInputDef.m_Members)
         {
-            const std::string cleanedMemberName = HlslCleanMemberName(member.m_MemberName);
+            const std::string cleanedMemberName = CleanMemberName(member.m_MemberName);
             const std::string varName = srInputDef.m_Name + "_" + cleanedMemberName;
 
             // Find the cbuffer definition
