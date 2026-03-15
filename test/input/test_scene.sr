@@ -2,25 +2,25 @@
 cbuffer SceneConstants
 {
     /* Camera matrices */
-    float4x4 g_mView;
-    float4x4 g_mProj;
-    float4x4 g_mViewProj;
-    float4x4 g_mInvViewProj;
+    float4x4 view;
+    float4x4 proj;
+    float4x4 viewProj;
+    float4x4 invViewProj;
 
-    float3  g_CameraPosWS;
-    float   g_Exposure;
+    float3  cameraPosWS;
+    float   exposure;
 
     /* Fog / atmosphere */
-    float4  g_FogParams;        // x = start, y = end, z = density, w = height falloff
-    float4  g_FogColor;
+    float4  fogParams;        // x = start, y = end, z = density, w = height falloff
+    float4  fogColor;
 
     /* Misc */
-    uint    g_FrameNumber;
-    float   g_DeltaTime;
+    uint    frameNumber;
+    float   deltaTime;
     float   pad0[2];            // explicit padding test
 };
 
 srinput MainInputs
 {
-    SceneConstants m_scene;
+    SceneConstants scene;
 };
