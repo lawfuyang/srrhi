@@ -16,6 +16,8 @@ std::vector<LayoutMember> ComputeLayouts(ParseResult& pr);
 std::string GenerateHlsl(const ParseResult& pr, const std::vector<LayoutMember>& layouts, int& padCount);
 std::string GenerateCpp(const ParseResult& pr, const std::vector<LayoutMember>& layouts, int& padCount);
 std::string VisualizeLayouts(const std::vector<LayoutMember>& layouts);
+std::string VisualizeLayoutsMachineReadable(const std::vector<LayoutMember>& layouts);
+int RunReflectionTests(const fs::path& testInputDir);
 
 // ---------------------------------------------------------------------------
 // Custom deleter for FILE*
@@ -132,11 +134,16 @@ static void ProcessFile(const fs::path& srFile,
     // --- Visualizer ---
     try
     {
-        std::string vis = VisualizeLayouts(layouts);
+        std::string vis      = VisualizeLayouts(layouts);
+        std::string visMR    = VisualizeLayoutsMachineReadable(layouts);
         if (g_Vis)
         {
             fprintf(g_Vis.get(), "=== %s ===\n", srFile.string().c_str());
             fwrite(vis.c_str(), 1, vis.size(), g_Vis.get());
+            // Machine-readable section, clearly delimited
+            fprintf(g_Vis.get(), "--- machine-readable ---\n");
+            fwrite(visMR.c_str(), 1, visMR.size(), g_Vis.get());
+            fprintf(g_Vis.get(), "\n");
             fflush(g_Vis.get());
         }
         LogMsg("  Visualizer: written %zu bytes for %s\n",
@@ -250,6 +257,7 @@ int main(int argc, char* argv[])
     // --- Parse arguments ---
     std::string inputDir;
     std::string outputDir;
+    bool runTests = false;
 
     for (int i = 1; i < argc; ++i)
     {
@@ -264,11 +272,17 @@ int main(int argc, char* argv[])
             outputDir = argv[++i];
             LogMsg("[srrhi] Arg -o: %s\n", outputDir.c_str());
         }
+        else if (arg == "--test")
+        {
+            runTests = true;
+            LogMsg("[srrhi] Arg --test: reflection test mode enabled\n");
+        }
         else if (arg == "--help" || arg == "-h")
         {
-            LogMsg("Usage: srrhi -i <input-dir> -o <output-dir>\n"
+            LogMsg("Usage: srrhi -i <input-dir> -o <output-dir> [--test]\n"
                    "  -i <dir>   Input folder (recursively scanned for .sr files)\n"
-                   "  -o <dir>   Output folder (hlsl/ and cpp/ subfolders created)\n");
+                   "  -o <dir>   Output folder (hlsl/ and cpp/ subfolders created)\n"
+                   "  --test     After generation, verify cbuffer layouts via DXC reflection\n");
             return 0;
         }
         else
@@ -280,13 +294,13 @@ int main(int argc, char* argv[])
     if (inputDir.empty())
     {
         LogMsg("[srrhi] ERROR: -i <input-dir> is required.\n"
-               "Usage: srrhi -i <input-dir> -o <output-dir>\n");
+               "Usage: srrhi -i <input-dir> -o <output-dir> [--test]\n");
         return 1;
     }
     if (outputDir.empty())
     {
         LogMsg("[srrhi] ERROR: -o <output-dir> is required.\n"
-               "Usage: srrhi -i <input-dir> -o <output-dir>\n");
+               "Usage: srrhi -i <input-dir> -o <output-dir> [--test]\n");
         return 1;
     }
 
@@ -370,6 +384,30 @@ int main(int argc, char* argv[])
         LogMsg("\n[srrhi] Done. All files processed successfully.\n");
     else
         LogMsg("\n[srrhi] Done with errors (exit code %d).\n", exitCode);
+
+    if (runTests)
+    {
+        LogMsg("\n[srrhi] Running reflection tests against DXC...\n");
+        int testResult = 1;
+        try
+        {
+            testResult = RunReflectionTests(inputRoot);
+        }
+        catch (const std::exception& e)
+        {
+            LogMsg("[srrhi] ERROR running reflection tests: %s\n", e.what());
+            testResult = 1;
+        }
+        if (testResult != 0)
+            LogMsg("[srrhi] Reflection tests FAILED.\n");
+        else
+            LogMsg("[srrhi] Reflection tests PASSED.\n");
+
+        // In --test mode the final exit code reflects the reflection test result;
+        // generation errors on intentionally-broken test files are expected and do
+        // not constitute a "test failure" in their own right.
+        return testResult;
+    }
 
     return exitCode;
 }

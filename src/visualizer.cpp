@@ -118,7 +118,7 @@ static void visitMember(VisualizerState& vs, const LayoutMember& m,
 }
 
 // ---------------------------------------------------------------------------
-// Public API
+// Public API — human-readable ASCII table
 // ---------------------------------------------------------------------------
 std::string VisualizeLayouts(const std::vector<LayoutMember>& layouts)
 {
@@ -143,4 +143,38 @@ std::string VisualizeLayouts(const std::vector<LayoutMember>& layouts)
 
     LogMsg("[visualizer] Done\n");
     return vs.out.str();
+}
+
+// ---------------------------------------------------------------------------
+// Machine-readable layout output
+//
+// Format (one cbuffer section per cbuffer, easy to parse line-by-line):
+//
+//   CBUFFER <name> SIZE <total_size_rounded_to_16>
+//   MEMBER <name> OFFSET <offset>
+//   MEMBER <name> OFFSET <offset>
+//   CBUFFER_END
+//
+// Only top-level members of each cbuffer are emitted (no padding members,
+// no sub-elements of arrays or matrices).  DXC reflection also exposes
+// variables at this same granularity, making direct comparison trivial.
+// ---------------------------------------------------------------------------
+std::string VisualizeLayoutsMachineReadable(const std::vector<LayoutMember>& layouts)
+{
+    std::ostringstream out;
+
+    for (const auto& cbLayout : layouts)
+    {
+        // Total size rounded to 16 — matches D3D12_SHADER_BUFFER_DESC::Size
+        int totalSize = (cbLayout.m_Size + 15) & ~15;
+
+        out << "CBUFFER " << cbLayout.m_Name << " SIZE " << totalSize << "\n";
+
+        for (const auto& m : cbLayout.m_Submembers)
+            out << "MEMBER " << m.m_Name << " OFFSET " << m.m_Offset << "\n";
+
+        out << "CBUFFER_END\n\n";
+    }
+
+    return out.str();
 }

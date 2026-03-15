@@ -232,15 +232,12 @@ struct Parser
     // -----------------------------------------------------------------------
     // Include handling
     // -----------------------------------------------------------------------
-    void ParseInclude()
+    // Called with m_Cur already pointing at the "include" identifier token.
+    // hashLine is the source line of the leading '#' (for error messages).
+    void ParseInclude(int hashLine)
     {
-        int hashLine = m_Cur.m_Line;
-        Advance(); // '#'
-
-        if (m_Cur.m_Kind != TokKind::Ident || m_Cur.m_Text != "include")
-            throw std::runtime_error(m_FilePath + ":" + std::to_string(m_Cur.m_Line) +
-                                     ": expected 'include' after '#'");
-        Advance();
+        // m_Cur == TokKind::Ident("include")  — already verified by caller
+        Advance(); // consume "include"; m_Cur is now the filename string
 
         if (m_Cur.m_Kind != TokKind::String)
             throw std::runtime_error(m_FilePath + ":" + std::to_string(m_Cur.m_Line) +
@@ -553,17 +550,16 @@ struct Parser
             if (Check(TokKind::Hash))
             {
                 int hashLine = m_Cur.m_Line;
-                Advance(); // '#'
-                
+                Advance(); // consume '#'; m_Cur is now the directive keyword
+
                 // Handle #include
                 if (m_Cur.m_Kind == TokKind::Ident && m_Cur.m_Text == "include")
                 {
-                    // Backtrack to re-parse as include
-                    m_Cur = Token{ TokKind::Hash, "#", hashLine };
-                    ParseInclude();
+                    // m_Cur is at "include" — ParseInclude picks up from here
+                    ParseInclude(hashLine);
                     continue;
                 }
-                
+
                 // Reject #pragma pack and #pragma pack_matrix directives
                 if (m_Cur.m_Kind == TokKind::Ident && m_Cur.m_Text == "pragma")
                 {
@@ -575,19 +571,15 @@ struct Parser
                         throw std::runtime_error(m_FilePath + ":" + std::to_string(hashLine) +
                                                  ": '#pragma " + pragmaType + "' is not allowed in this file format");
                     }
-                    // Skip unknown pragmas
-                    while (!Check(TokKind::Eof) && m_Cur.m_Kind != TokKind::Hash)
+                    // Skip unknown pragmas (advance until next '#' or EOF)
+                    while (!Check(TokKind::Eof) && !Check(TokKind::Hash))
                         Advance();
                     continue;
                 }
-                
+
                 // Skip unknown hash directives
-                while (!Check(TokKind::Eof))
-                {
-                    if (m_Cur.m_Kind == TokKind::Hash)
-                        break;
+                while (!Check(TokKind::Eof) && !Check(TokKind::Hash))
                     Advance();
-                }
                 continue;
             }
 

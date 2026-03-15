@@ -118,3 +118,9 @@ struct LayoutMember
 // Logging
 // ---------------------------------------------------------------------------
 void LogMsg(const char* fmt, ...);
+
+// ---------------------------------------------------------------------------
+// Visualizer declarations (implemented in visualizer.cpp)
+// ---------------------------------------------------------------------------
+std::string VisualizeLayouts(const std::vector<LayoutMember>& layouts);
+std::string VisualizeLayoutsMachineReadable(const std::vector<LayoutMember>& layouts);
