@@ -1,88 +1,58 @@
 ﻿#include "types.h"
 #include <sstream>
+#include <stdexcept>
 
 // ---------------------------------------------------------------------------
-// HLSL -> DirectXMath type mapping  (non-array, non-matrix use)
+// C++ type mapping from BuiltinType
 // ---------------------------------------------------------------------------
-
 struct CppTypeInfo { std::string typeName; int arrayMult = 0; };
 
-static CppTypeInfo mapToCppType(const HlslType& t)
+static CppTypeInfo mapBuiltinToCpp(const BuiltinType& bt)
 {
-    if (t.isScalar())
-    {
-        switch (t.scalar)
-        {
-            case ScalarKind::Bool:   return {"BOOL"};
-            case ScalarKind::Half:   return {"DirectX::PackedVector::HALF"};
-            case ScalarKind::Float:  return {"float"};
-            case ScalarKind::Double: return {"double"};
-            case ScalarKind::Int:    return {"int32_t"};
-            case ScalarKind::Uint:   return {"uint32_t"};
-            case ScalarKind::Uint16: return {"uint16_t"};
-            case ScalarKind::Int16:  return {"int16_t"};
-        }
-    }
-    if (t.isVector())
-    {
-        int n = t.cols;
-        switch (t.scalar)
-        {
-            case ScalarKind::Float:
-                if (n == 2) return {"DirectX::XMFLOAT2"};
-                if (n == 3) return {"DirectX::XMFLOAT3"};
-                if (n == 4) return {"DirectX::XMFLOAT4"};
-                break;
-            case ScalarKind::Int:
-                if (n == 2) return {"DirectX::XMINT2"};
-                if (n == 3) return {"DirectX::XMINT3"};
-                if (n == 4) return {"DirectX::XMINT4"};
-                break;
-            case ScalarKind::Uint:
-                if (n == 2) return {"DirectX::XMUINT2"};
-                if (n == 3) return {"DirectX::XMUINT3"};
-                if (n == 4) return {"DirectX::XMUINT4"};
-                break;
-            case ScalarKind::Half:
-                if (n == 2) return {"DirectX::PackedVector::XMHALF2"};
-                if (n == 4) return {"DirectX::PackedVector::XMHALF4"};
-                break;
-            default: break;
-        }
-        // Fallback: emit as scalar array
-        CppTypeInfo fi = mapToCppType(HlslType{t.scalar, 1, 1, false});
-        fi.arrayMult = n;
-        return fi;
-    }
-    if (t.isMatrix())
-    {
-        if (t.scalar == ScalarKind::Float)
-        {
-            int r = t.rows, c = t.cols;
-            if (r == 2 && c == 2) return {"DirectX::XMFLOAT2X2"};
-            if (r == 3 && c == 3) return {"DirectX::XMFLOAT3X3"};
-            if (r == 4 && c == 3) return {"DirectX::XMFLOAT4X3"};
-            if (r == 4 && c == 4) return {"DirectX::XMFLOAT4X4"};
-        }
-        // Fallback: cols * (16/scalarBytes) scalars total
-        CppTypeInfo fi = mapToCppType(HlslType{t.scalar, 1, 1, false});
-        fi.arrayMult = t.cols * (16 / t.scalarBytes());
-        return fi;
-    }
-    return {"float"};
-}
+    const std::string& sc = bt.scalarName;
+    int vs = bt.vectorsize;
 
-// Helpers
-// ---------------------------------------------------------------------------
+    // Scalar
+    if (vs == 1)
+    {
+        if (sc == "float" || sc == "float32_t")  return {"float"};
+        if (sc == "float16_t")  return {"uint16_t"};   // closest 2-byte C type
+        if (sc == "float64_t" || sc == "double") return {"double"};
+        if (sc == "int"  || sc == "int32_t")  return {"int32_t"};
+        if (sc == "uint" || sc == "uint32_t") return {"uint32_t"};
+        if (sc == "int16_t")   return {"int16_t"};
+        if (sc == "uint16_t")  return {"uint16_t"};
+        if (sc == "int64_t")   return {"int64_t"};
+        if (sc == "uint64_t")  return {"uint64_t"};
+        if (sc == "bool")      return {"BOOL"};
+        return {"float"};
+    }
 
-// How many bytes the cursor advances after a single (non-array) primitive field.
-// For matrices: (cols-1)*16 + rows*scalarBytes (last column has no trailing 16B slot padding).
-// For others:   byteSize (= scalarBytes * cols for vectors).
-static int primitiveFieldCursorAdvance(const HlslType& t)
-{
-    if (t.isMatrix())
-        return (t.cols - 1) * 16 + t.rows * t.scalarBytes();
-    return t.byteSize();
+    // float vectors — use DirectXMath when available
+    if (sc == "float" || sc == "float32_t")
+    {
+        if (vs == 2) return {"DirectX::XMFLOAT2"};
+        if (vs == 3) return {"DirectX::XMFLOAT3"};
+        if (vs == 4) return {"DirectX::XMFLOAT4"};
+    }
+    if (sc == "int" || sc == "int32_t")
+    {
+        if (vs == 2) return {"DirectX::XMINT2"};
+        if (vs == 3) return {"DirectX::XMINT3"};
+        if (vs == 4) return {"DirectX::XMINT4"};
+    }
+    if (sc == "uint" || sc == "uint32_t")
+    {
+        if (vs == 2) return {"DirectX::XMUINT2"};
+        if (vs == 3) return {"DirectX::XMUINT3"};
+        if (vs == 4) return {"DirectX::XMUINT4"};
+    }
+
+    // Fallback: scalar array
+    CppTypeInfo base = mapBuiltinToCpp(BuiltinType{bt.scalarName, bt.scalarName,
+                                                    bt.elementsize, bt.alignment, 1});
+    base.arrayMult = vs;
+    return base;
 }
 
 static void emitPadding(std::ostringstream& out, int padBytes, int& padCount,
@@ -90,237 +60,243 @@ static void emitPadding(std::ostringstream& out, int padBytes, int& padCount,
 {
     if (padBytes <= 0) return;
     while (padBytes >= 4)
-        out << ind << "uint32_t pad" << padCount++ << ";\n", padBytes -= 4;
+    {
+        out << ind << "uint32_t pad" << padCount++ << ";\n";
+        padBytes -= 4;
+    }
     if (padBytes == 2)
         out << ind << "uint16_t pad" << padCount++ << ";\n";
     else if (padBytes != 0)
         out << ind << "// WARNING: " << padBytes << " unaccounted byte(s)\n";
 }
 
-// Returns true if this matrix type has a named DXMath type (sizeof matches exactly).
-static bool matrixHasNamedType(const HlslType& t)
-{
-    if (!t.isMatrix() || t.scalar != ScalarKind::Float) return false;
-    int r = t.rows, c = t.cols;
-    return (r == 2 && c == 2) || (r == 3 && c == 3) ||
-           (r == 4 && c == 3) || (r == 4 && c == 4);
-}
+// ---------------------------------------------------------------------------
+// Emit struct / cbuffer members (C++)
+//   - Walks members paired with their layout submembers.
+//   - Array fields are EXPANDED to per-element members with stride padding.
+//   - Matrix fields (created_from_matrix arrays) are emitted column-by-column.
+// ---------------------------------------------------------------------------
 
-// Expand a non-array unnamed matrix field into per-column members.
-// Each column except the last occupies a full 16-byte slot.
-// The last column only has rows*scalarBytes actual data — no trailing slot padding.
-// Returns the offset committed after the last column's data.
-static int expandMatrixColumns(std::ostringstream& out, const HlslType& ht,
-                                const std::string& name, int baseOffset,
-                                const std::string& ind, int& padCount)
+static void emitMembersCpp(std::ostringstream& out,
+                            const std::vector<MemberVariable>& members,
+                            const std::vector<LayoutMember>& lms,
+                            int& padCount, const std::string& ind)
 {
-    // Scalar type name for one component
-    std::string scalarTypeName = mapToCppType(HlslType{ht.scalar, 1, 1, false}).typeName;
-    int elemsPerSlot = 16 / ht.scalarBytes(); // floats per 16-byte slot
-    int colDataElems = ht.rows;               // actual data elements in one column
+    int cursor = 0;
 
-    for (int c = 0; c < ht.cols; ++c)
+    for (size_t i = 0; i < members.size(); ++i)
     {
-        std::string colName = name + "_c" + std::to_string(c);
-        bool lastCol = (c == ht.cols - 1);
-        if (lastCol)
+        const MemberVariable& mv = members[i];
+        const LayoutMember* lm   = (i < lms.size()) ? &lms[i] : nullptr;
+
+        // Determine field offset for pre-field padding
+        int fieldOffset = lm ? lm->offset : cursor;
+        if (fieldOffset > cursor)
+            emitPadding(out, fieldOffset - cursor, padCount, ind);
+
+        // === Struct field ===
+        if (auto* sp = std::get_if<StructType*>(&mv.type))
         {
-            // Last column: emit only the actual data elements (no slot padding)
-            out << ind << scalarTypeName << " " << colName
-                << "[" << colDataElems << "];\n";
+            if (!lm) { cursor = fieldOffset; continue; }
+
+            // Check if this is an array of structs (layout node is an array)
+            bool isArray = std::holds_alternative<std::shared_ptr<ArrayNode>>(lm->type);
+            if (isArray)
+            {
+                // Expand each array element as a separate struct member
+                for (size_t e = 0; e < lm->submembers.size(); ++e)
+                {
+                    const LayoutMember& elem = lm->submembers[e];
+                    std::string eName = mv.name + "_" + std::to_string(e);
+                    out << ind << (*sp)->name << " " << eName << ";\n";
+                    if (elem.padding > 0)
+                        emitPadding(out, elem.padding, padCount, ind);
+                    cursor = elem.offset + elem.size + elem.padding;
+                }
+            }
+            else
+            {
+                // Single struct member
+                out << ind << (*sp)->name << " " << mv.name << ";\n";
+                if (lm->padding > 0)
+                    emitPadding(out, lm->padding, padCount, ind);
+                cursor = lm->offset + lm->size + lm->padding;
+            }
+            continue;
+        }
+
+        // === BuiltinType or ArrayNode field ===
+        if (!lm) { cursor = fieldOffset; continue; }
+
+        bool isArray = std::holds_alternative<std::shared_ptr<ArrayNode>>(lm->type);
+
+        if (isArray)
+        {
+            const ArrayNode& arr = *std::get<std::shared_ptr<ArrayNode>>(lm->type);
+
+            if (arr.created_from_matrix)
+            {
+                // Matrix: emit column-by-column
+                const BuiltinType* elemBt = std::get_if<BuiltinType>(&arr.elementType);
+                if (elemBt)
+                {
+                    auto cti = mapBuiltinToCpp(*elemBt);
+                    int colDataElems = elemBt->vectorsize;
+                    int elemsPerSlot = 16 / elemBt->elementsize;
+
+                    for (size_t c = 0; c < lm->submembers.size(); ++c)
+                    {
+                        const LayoutMember& col = lm->submembers[c];
+                        bool lastCol = (c == lm->submembers.size() - 1);
+                        std::string colName = mv.name + "_c" + std::to_string(c);
+
+                        if (lastCol)
+                            out << ind << cti.typeName << " " << colName << "[" << colDataElems << "];\n";
+                        else
+                            out << ind << cti.typeName << " " << colName << "[" << elemsPerSlot << "];\n";
+
+                        if (!lastCol && col.padding > 0)
+                            emitPadding(out, col.padding, padCount, ind);
+                        cursor = col.offset + col.size + (lastCol ? lm->padding : col.padding);
+                    }
+                    if (lm->padding > 0)
+                        emitPadding(out, lm->padding, padCount, ind);
+                    cursor = lm->offset + lm->size + lm->padding;
+                }
+            }
+            else
+            {
+                // Regular array: expand per element
+                for (size_t e = 0; e < lm->submembers.size(); ++e)
+                {
+                    const LayoutMember& elem = lm->submembers[e];
+                    bool lastElem = (e == lm->submembers.size() - 1);
+
+                    if (auto* elemBt = std::get_if<BuiltinType>(&elem.type))
+                    {
+                        auto cti = mapBuiltinToCpp(*elemBt);
+                        std::string eName = mv.name + "_" + std::to_string(e);
+                        out << ind << cti.typeName << " " << eName;
+                        if (cti.arrayMult > 0)
+                            out << "[" << cti.arrayMult << "]";
+                        out << ";\n";
+                    }
+                    else if (auto* elemSp = std::get_if<StructType*>(&elem.type))
+                    {
+                        std::string eName = mv.name + "_" + std::to_string(e);
+                        out << ind << (*elemSp)->name << " " << eName << ";\n";
+                    }
+
+                    if (!lastElem && elem.padding > 0)
+                        emitPadding(out, elem.padding, padCount, ind);
+                    cursor = elem.offset + elem.size + (lastElem ? 0 : elem.padding);
+                }
+                cursor = lm->offset + lm->size + lm->padding;
+            }
         }
         else
         {
-            // Non-last columns: emit slot-width array for proper 16-byte alignment
-            out << ind << scalarTypeName << " " << colName
-                << "[" << elemsPerSlot << "];\n";
+            // Single non-array BuiltinType field
+            const BuiltinType* bt = std::get_if<BuiltinType>(&lm->type);
+            if (bt)
+            {
+                auto cti = mapBuiltinToCpp(*bt);
+                out << ind << cti.typeName << " " << mv.name;
+                if (cti.arrayMult > 0) out << "[" << cti.arrayMult << "]";
+                out << ";\n";
+            }
+            if (lm->padding > 0)
+                emitPadding(out, lm->padding, padCount, ind);
+            cursor = lm->offset + lm->size + lm->padding;
         }
     }
-
-    // Committed end after last column data
-    return baseOffset + (ht.cols - 1) * 16 + colDataElems * ht.scalarBytes();
-}
-
-// Emit one non-array primitive field (no expansion).
-// For unnamed matrix types (arrayMult>0), emit column-by-column expansion.
-// Returns the committed end offset.
-static int emitPrimitiveMember(std::ostringstream& out, const HlslType& ht,
-                                const std::string& name, int fieldOffset,
-                                const std::string& ind, int& padCount)
-{
-    auto cti = mapToCppType(ht);
-    if (ht.isMatrix() && cti.arrayMult > 0 && !matrixHasNamedType(ht))
-    {
-        // Unnamed matrix: expand column by column for exact byte layout
-        return expandMatrixColumns(out, ht, name, fieldOffset, ind, padCount);
-    }
-    out << ind << cti.typeName << " " << name;
-    if (cti.arrayMult > 0)
-        out << "[" << cti.arrayMult << "]";
-    out << ";\n";
-    return fieldOffset + primitiveFieldCursorAdvance(ht);
-}
-
-// Expand an array field into per-element members + inter-element stride padding.
-// Last element gets no trailing stride padding (only consumes its data bytes).
-// Returns committed end offset after last element's data.
-static int expandArrayField(std::ostringstream& out, const Field& f, const std::string& ind,
-                             int& padCount)
-{
-    int stride = f.sizeBytes + f.paddingBytes;
-    int n = f.totalElements();
-    int elemOffset = f.offsetBytes;
-
-    for (int i = 0; i < n; ++i)
-    {
-        std::string ename = f.name + "_" + std::to_string(i);
-        bool lastElem = (i == n - 1);
-
-        if (f.isStruct)
-        {
-            out << ind << f.structType->name << " " << ename << ";\n";
-        }
-        else
-        {
-            emitPrimitiveMember(out, f.hlslType, ename, elemOffset, ind, padCount);
-        }
-        // Inter-element stride padding (skip after last element)
-        if (!lastElem && f.paddingBytes > 0)
-            emitPadding(out, f.paddingBytes, padCount, ind);
-
-        elemOffset += stride;
-    }
-
-    // Committed end = last element's start + its sizeBytes (no trailing stride pad)
-    return f.offsetBytes + (n - 1) * stride + f.sizeBytes;
 }
 
 // ---------------------------------------------------------------------------
-// Struct emitters
+// Emit a named struct definition (for use in the C++ header)
 // ---------------------------------------------------------------------------
-
-// Used-struct definitions: structs referenced from cbuffers.
-// We do NOT pad them to 16 bytes here — padding in the cbuffer struct is always explicit.
-// However, when a struct is used as an array element, it needs its stride embedded.
-// Solution: emit the struct with padding up to alignUp(sizeBytes, 16) so that
-//           array elements naturally get 16-byte stride, and compensate in single-use
-//           context by noting the struct is already padded.
-// The simplest consistent choice: always pad struct to alignUp(sizeBytes, 16).
-// Single-use cbuffer fields that need LESS trailing pad: handled by computing
-//   f.paddingBytes = nextOffset - (offsetBytes + sizeBytes) in layout,
-//   but the struct in C++ has alignUp(sizeBytes,16) size, so a single struct field
-//   will be LARGER than expected.
-//
-// Better approach: emit struct as its exact sizeBytes (no trailing pad), then:
-//   - Single use: emit trailing pad from f.paddingBytes
-//   - Array use:  expand to per-element members with inter-element stride padding
-//
-// This means struct arrays cannot use C++ array syntax — we expand them.
-// This is always correct and byte-accurate.
-static void emitStructDef(std::ostringstream& out, const StructType& st, int& padCount)
+static void emitStructCpp(std::ostringstream& out, const StructType& st,
+                           int& padCount)
 {
-    std::string fInd("    ");
     out << "struct " << st.name << "\n{\n";
-
-    int offset = 0;
-    for (const auto& f : st.fields)
-    {
-        if (f.offsetBytes > offset)
-            emitPadding(out, f.offsetBytes - offset, padCount, fInd);
-
-        if (f.arrayDims.empty())
-        {
-            if (f.isStruct)
-            {
-                out << fInd << f.structType->name << " " << f.name << ";\n";
-                if (f.paddingBytes > 0)
-                    emitPadding(out, f.paddingBytes, padCount, fInd);
-                offset = f.offsetBytes + f.sizeBytes + f.paddingBytes;
-            }
-            else
-            {
-                int dataEnd = emitPrimitiveMember(out, f.hlslType, f.name, f.offsetBytes, fInd, padCount);
-                if (f.paddingBytes > 0)
-                    emitPadding(out, f.paddingBytes, padCount, fInd);
-                offset = dataEnd + f.paddingBytes;
-            }
-        }
-        else
-        {
-            // Array field inside a struct: expand element by element
-            offset = expandArrayField(out, f, fInd, padCount);
-        }
-    }
-
-    // No extra padding needed here — the struct definition exactly matches sizeBytes.
-    // Consumers (array expansion) add inter-element stride padding explicitly.
-
-    out << "};\n\n";
-}
-
-static void emitCBufferDef(std::ostringstream& out, const CBuffer& cb, int& padCount)
-{
+    // Structs without layout info: emit fields in order without padding
+    // (padding is added in the cbuffer context)
     std::string fInd("    ");
-    out << "struct alignas(16) " << cb.name << "\n{\n";
-
-    int offset = 0;
-    for (const auto& f : cb.fields)
+    for (const auto& mv : st.members)
     {
-        if (f.offsetBytes > offset)
-            emitPadding(out, f.offsetBytes - offset, padCount, fInd);
-
-        if (f.arrayDims.empty())
+        if (auto* sp = std::get_if<StructType*>(&mv.type))
+            out << fInd << (*sp)->name << " " << mv.name << ";\n";
+        else if (auto* bt = std::get_if<BuiltinType>(&mv.type))
         {
-            // Single (non-array) field
-            if (f.isStruct)
+            auto cti = mapBuiltinToCpp(*bt);
+            out << fInd << cti.typeName << " " << mv.name;
+            if (cti.arrayMult > 0) out << "[" << cti.arrayMult << "]";
+            out << ";\n";
+        }
+        else if (auto* ap = std::get_if<std::shared_ptr<ArrayNode>>(&mv.type))
+        {
+            const ArrayNode& arr = **ap;
+            if (arr.created_from_matrix)
             {
-                out << fInd << f.structType->name << " " << f.name << ";\n";
-                if (f.paddingBytes > 0)
-                    emitPadding(out, f.paddingBytes, padCount, fInd);
-                offset = f.offsetBytes + f.sizeBytes + f.paddingBytes;
+                // Matrix: emit as array of column vectors, e.g. float4x4 → XMFLOAT4[4]
+                if (auto* elemBt = std::get_if<BuiltinType>(&arr.elementType))
+                {
+                    auto cti = mapBuiltinToCpp(*elemBt);
+                    out << fInd << cti.typeName << " " << mv.name << "[" << arr.arraySize << "];\n";
+                }
             }
             else
             {
-                int dataEnd = emitPrimitiveMember(out, f.hlslType, f.name, f.offsetBytes, fInd, padCount);
-                if (f.paddingBytes > 0)
-                    emitPadding(out, f.paddingBytes, padCount, fInd);
-                offset = dataEnd + f.paddingBytes;
+                if (auto* elemBt = std::get_if<BuiltinType>(&arr.elementType))
+                {
+                    auto cti = mapBuiltinToCpp(*elemBt);
+                    out << fInd << cti.typeName << " " << mv.name << "[" << arr.arraySize << "];\n";
+                }
+                else if (auto* elemSp = std::get_if<StructType*>(&arr.elementType))
+                {
+                    out << fInd << (*elemSp)->name << " " << mv.name << "[" << arr.arraySize << "];\n";
+                }
             }
         }
-        else
-        {
-            // Array field: expand element by element with inter-element stride padding
-            offset = expandArrayField(out, f, fInd, padCount);
-        }
     }
-
     out << "};\n\n";
 }
 
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
-
-std::string generateCpp(const ParseResult& pr, const std::vector<CBuffer>& layoutCbs,
-                        int& padCount)
+std::string generateCpp(const ParseResult& pr,
+                         const std::vector<LayoutMember>& layouts,
+                         int& padCount)
 {
     logMsg("[cpp_gen] Generating C++ header...\n");
-    
+
     std::ostringstream out;
     out << "// Auto-generated by srrhi. Do not edit.\n";
     out << "#pragma once\n";
-    out << "#include <cstdint>\n";
-    out << "#include <DirectXMath.h>\n";
-    out << "#include <DirectXPackedVector.h>\n\n";
+    out << "#include <cstdint>\n\n";
 
-    logMsg("[cpp_gen]   Emitting %zu structs...\n", pr.structs.size());
+    // Named struct definitions
     for (const auto& st : pr.structs)
-        emitStructDef(out, st, padCount);
+        emitStructCpp(out, st, padCount);
 
-    logMsg("[cpp_gen]   Emitting %zu cbuffers...\n", layoutCbs.size());
-    for (const auto& cb : layoutCbs)
-        emitCBufferDef(out, cb, padCount);
+    // cbuffer as alignas(16) structs with full byte-exact layout
+    size_t layoutIdx = 0;
+    for (const auto& bufMv : pr.buffers)
+    {
+        if (!bufMv.isCBuffer) continue;
+        auto* sp = std::get_if<StructType*>(&bufMv.type);
+        if (!sp || !*sp) continue;
 
-    logMsg("[cpp_gen] C++ header generation complete (padCount=%d)\n", padCount);
+        if (layoutIdx >= layouts.size()) continue;
+        const LayoutMember& lm = layouts[layoutIdx++];
+        const StructType& st   = **sp;
+
+        out << "struct alignas(16) " << st.name << "\n{\n";
+        emitMembersCpp(out, st.members, lm.submembers, padCount, "    ");
+        out << "};\n\n";
+    }
+
+    logMsg("[cpp_gen] Done (padCount=%d)\n", padCount);
     return out.str();
 }

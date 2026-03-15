@@ -2,10 +2,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <filesystem>
-#include <memory>
 #include <stdexcept>
-#include <string>
-#include <vector>
 
 #include "types.h"
 
@@ -15,10 +12,10 @@ namespace fs = std::filesystem;
 // Forward declarations
 // ---------------------------------------------------------------------------
 ParseResult parseFile(const std::string& path);
-std::vector<FlatLayout> computeLayouts(ParseResult& pr);
-std::string generateHlsl(const ParseResult& pr, const std::vector<CBuffer>& layoutCbs, int& padCount);
-std::string generateCpp(const ParseResult& pr, const std::vector<CBuffer>& layoutCbs, int& padCount);
-std::string visualizeLayouts(const std::vector<FlatLayout>& layouts);
+std::vector<LayoutMember> computeLayouts(ParseResult& pr);
+std::string generateHlsl(const ParseResult& pr, const std::vector<LayoutMember>& layouts, int& padCount);
+std::string generateCpp(const ParseResult& pr, const std::vector<LayoutMember>& layouts, int& padCount);
+std::string visualizeLayouts(const std::vector<LayoutMember>& layouts);
 
 // ---------------------------------------------------------------------------
 // Custom deleter for FILE*
@@ -98,8 +95,10 @@ static void processFile(const fs::path& srFile,
     try
     {
         pr = parseFile(srFile.string());
-        logMsg("  Parse OK: %zu cbuffer(s), %zu struct(s)\n",
-               pr.cbuffers.size(), pr.structs.size());
+        long cbufferCount = 0;
+        for (auto& b : pr.buffers) if (b.isCBuffer) ++cbufferCount;
+        logMsg("  Parse OK: %ld cbuffer(s), %zu struct(s)\n",
+               cbufferCount, pr.structs.size());
     }
     catch (const std::exception& e)
     {
@@ -108,14 +107,16 @@ static void processFile(const fs::path& srFile,
             std::string("Parse failed for '") + srFile.string() + "': " + e.what());
     }
 
-    if (pr.cbuffers.empty())
+    bool hasCBuffers = false;
+    for (auto& b : pr.buffers) if (b.isCBuffer) { hasCBuffers = true; break; }
+    if (!hasCBuffers)
     {
         logMsg("  No cbuffers found in '%s', skipping.\n", srFile.string().c_str());
         return;
     }
 
     // --- Compute layouts ---
-    std::vector<FlatLayout> layouts;
+    std::vector<LayoutMember> layouts;
     try
     {
         layouts = computeLayouts(pr);
@@ -156,7 +157,7 @@ static void processFile(const fs::path& srFile,
     try
     {
         int padCount = globalPadCount;
-        std::string hlslContent = generateHlsl(pr, pr.cbuffers, padCount);
+        std::string hlslContent = generateHlsl(pr, layouts, padCount);
 
         // Wrap with old-school include guard
         std::string guard = makeHlslGuard(stem);
@@ -183,7 +184,7 @@ static void processFile(const fs::path& srFile,
     try
     {
         int padCount = globalPadCount;
-        std::string cppContent = generateCpp(pr, pr.cbuffers, padCount);
+        std::string cppContent = generateCpp(pr, layouts, padCount);
 
         fs::path cppOut = outputRoot / "cpp" / stem;
         cppOut += ".h";
