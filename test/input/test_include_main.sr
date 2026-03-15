@@ -7,3 +7,8 @@ cbuffer ObjectData
     Material  g_Material;
     float     g_Time;
 };
+
+srinput MainInputs
+{
+    ObjectData m_objectData;
+};

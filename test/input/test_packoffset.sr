@@ -4,3 +4,8 @@ cbuffer BadCB
     float4 v : packoffset(c0);
     float f;
 };
+
+srinput MainInputs
+{
+    BadCB m_badcb;
+};

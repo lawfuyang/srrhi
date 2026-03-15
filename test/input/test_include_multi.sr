@@ -8,3 +8,8 @@ cbuffer ComplexScene
     Transform   g_CameraTransform;
     Material    g_DefaultMaterial;
 };
+
+srinput MainInputs
+{
+    ComplexScene m_complexScene;
+};

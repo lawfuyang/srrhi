@@ -4,3 +4,8 @@ cbuffer invalid_cb
     UnknownType value;
     float valid_field;
 };
+
+srinput MainInputs
+{
+    invalid_cb m_invalid;
+};

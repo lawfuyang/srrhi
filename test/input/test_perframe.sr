@@ -9,3 +9,8 @@ cbuffer PerFrame
     float       NearPlane;
     float       FarPlane;
 };
+
+srinput MainInputs
+{
+    PerFrame m_perFrame;
+};

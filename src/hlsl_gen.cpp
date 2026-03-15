@@ -1,6 +1,9 @@
-#include "types.h"
+﻿#include "types.h"
 #include <sstream>
 #include <stdexcept>
+#include <cctype>
+#include <unordered_map>
+#include <unordered_set>
 
 // ---------------------------------------------------------------------------
 // HLSL type name reconstruction from TypeRef
@@ -149,15 +152,39 @@ static void EmitStructHlsl(std::ostringstream& out, const StructType& st,
 
 // ---------------------------------------------------------------------------
 // Emit cbuffer (HLSL)
+// registerNum = -1 means no register binding
 // ---------------------------------------------------------------------------
 static void EmitCBufferHlsl(std::ostringstream& out,
                              const StructType& bufferStruct,
                              const LayoutMember& layout,
-                             int& padCount)
+                             int& padCount,
+                             int registerNum = -1)
 {
-    out << "cbuffer " << bufferStruct.m_Name << "\n{\n";
+    if (registerNum < 0)
+        out << "cbuffer " << bufferStruct.m_Name << "\n{\n";
+    else
+        out << "cbuffer " << bufferStruct.m_Name << " : register(b" << registerNum << ")\n{\n";
 
     EmitStructBodyHlsl(out, bufferStruct.m_Members, layout.m_Submembers,
+                       padCount, 1);
+
+    out << "};\n\n";
+}
+
+// ---------------------------------------------------------------------------
+// Emit wrapped cbuffer for srinput member (HLSL)
+// Instead of wrapping in a struct member, directly emit the cbuffer with
+// fields plus padding, keeping the register binding.
+// ---------------------------------------------------------------------------
+static void EmitWrappedCBufferHlsl(std::ostringstream& out,
+                                   const StructType& cbufferDef,
+                                   const LayoutMember& layout,
+                                   int registerNum,
+                                   int& padCount)
+{
+    out << "cbuffer " << cbufferDef.m_Name << " : register(b" << registerNum << ")\n{\n";
+
+    EmitStructBodyHlsl(out, cbufferDef.m_Members, layout.m_Submembers,
                        padCount, 1);
 
     out << "};\n\n";
@@ -178,22 +205,86 @@ std::string GenerateHlsl(const ParseResult& pr,
     // Emit named struct definitions
     LogMsg("[hlsl_gen]   Emitting %zu struct(s)...\n", pr.m_Structs.size());
     for (const auto& st : pr.m_Structs)
-        EmitStructHlsl(out, st, padCount, 0, nullptr);
-
-    // Emit cbuffers (using layout info for padding)
-    LogMsg("[hlsl_gen]   Emitting %zu cbuffer(s)...\n", layouts.size());
-
-    size_t layoutIdx = 0;
-    for (const auto& bufMv : pr.m_Buffers)
     {
-        if (!bufMv.m_bIsCBuffer) continue;
-        auto* sp = std::get_if<StructType*>(&bufMv.m_Type);
-        if (!sp || !*sp) continue;
+        int localPadCount = 0;
+        EmitStructHlsl(out, st, localPadCount, 0, nullptr);
+    }
 
-        if (layoutIdx < layouts.size())
+    // Build a set of cbuffer names that are in srinput scopes
+    std::unordered_set<std::string> cbuffersInSrInput;
+    for (const auto& srInputDef : pr.m_SrInputDefs)
+    {
+        for (const auto& member : srInputDef.m_Members)
         {
-            EmitCBufferHlsl(out, **sp, layouts[layoutIdx], padCount);
-            ++layoutIdx;
+            cbuffersInSrInput.insert(member.m_CBufferName);
+        }
+    }
+
+    // Emit cbuffer definitions as structs (only for those in srinput scopes)
+    std::vector<std::string> cbuffersInSrInputVec(cbuffersInSrInput.begin(), 
+                                                   cbuffersInSrInput.end());
+    LogMsg("[hlsl_gen]   Emitting %zu cbuffer definition(s) as struct(s)...\n",
+           cbuffersInSrInputVec.size());
+    for (const auto& bufDef : pr.m_BufferDefs)
+    {
+        if (cbuffersInSrInput.count(bufDef.m_Name))
+        {
+            // Find the corresponding layout to include padding
+            const LayoutMember* bufLayout = nullptr;
+            for (const auto& lm : layouts)
+            {
+                if (lm.m_Name == bufDef.m_Name)
+                {
+                    bufLayout = &lm;
+                    break;
+                }
+            }
+            int localPadCount = 0;
+            EmitStructHlsl(out, bufDef, localPadCount, 0, bufLayout);
+        }
+    }
+
+    // Emit cbuffers that are in srinput scopes
+    // Register numbers are allocated globally across all srinput scopes
+    LogMsg("[hlsl_gen]   Emitting cbuffers with register bindings...\n");
+    int globalRegisterNum = 0;
+    for (const auto& srInputDef : pr.m_SrInputDefs)
+    {
+        for (const auto& member : srInputDef.m_Members)
+        {
+            // Find the cbuffer definition
+            StructType* bufDef = nullptr;
+            for (const auto& bd : pr.m_BufferDefs)
+            {
+                if (bd.m_Name == member.m_CBufferName)
+                {
+                    bufDef = const_cast<StructType*>(&bd);
+                    break;
+                }
+            }
+
+            if (bufDef)
+            {
+                // Find the corresponding layout
+                const LayoutMember* correspondingLayout = nullptr;
+                for (const auto& lm : layouts)
+                {
+                    if (lm.m_Name == member.m_CBufferName)
+                    {
+                        correspondingLayout = &lm;
+                        break;
+                    }
+                }
+
+                if (correspondingLayout)
+                {
+                    int localPadCount = 0;
+                    EmitWrappedCBufferHlsl(out, *bufDef, *correspondingLayout, 
+                                          globalRegisterNum, localPadCount);
+                }
+            }
+
+            ++globalRegisterNum;
         }
     }
 

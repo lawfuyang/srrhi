@@ -7,3 +7,8 @@ cbuffer StressMatrices {
     float4 vecAfter;
     matrix<float, 2, 2> smallMat;
 };
+
+srinput MainInputs
+{
+    StressMatrices m_matrices;
+};

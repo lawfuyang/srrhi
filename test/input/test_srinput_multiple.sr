@@ -1,0 +1,28 @@
+cbuffer CameraConsts
+{
+    float3 Position;
+    float  FOV;
+};
+
+cbuffer LightConsts
+{
+    float3 Direction;
+    float  Intensity;
+};
+
+cbuffer MaterialConsts
+{
+    float3 Albedo;
+    float  Roughness;
+};
+
+srinput LightingInputs
+{
+    CameraConsts m_Camera;
+    LightConsts m_Light;
+};
+
+srinput MaterialInputs
+{
+    MaterialConsts m_Material;
+};

@@ -5,3 +5,8 @@ cbuffer LightingConstants
     int    ActiveLightCount;
     uint   FrameIndex;
 };
+
+srinput MainInputs
+{
+    LightingConstants m_lighting;
+};

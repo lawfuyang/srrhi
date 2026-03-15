@@ -495,7 +495,13 @@ struct Parser
             MemberVariable mv;
             mv.m_Type = std::move(fieldType);
             mv.m_Name = nameTok.m_Text;
-            out.push_back(std::move(mv));
+            
+            // Skip explicit padding members (ones named pad*) during parsing
+            // The layout engine will auto-generate padding as needed
+            if (mv.m_Name.size() < 3 || mv.m_Name.substr(0, 3) != "pad")
+            {
+                out.push_back(std::move(mv));
+            }
         }
         while (TryConsume(TokKind::Comma));
 
@@ -683,6 +689,62 @@ struct Parser
                 continue;
             }
 
+            // ---- srinput Name { cbuffers }; ----
+            if (kw == "srinput")
+            {
+                Advance();
+                Token srInputName = Expect(TokKind::Ident, "srinput name");
+                Expect(TokKind::LBrace, "{");
+
+                SrInputDef srInputDef;
+                srInputDef.m_Name = srInputName.m_Text;
+
+                while (!Check(TokKind::RBrace) && !Check(TokKind::Eof))
+                {
+                    // Expect: typeName memberName;
+                    if (m_Cur.m_Kind != TokKind::Ident)
+                        throw std::runtime_error(m_FilePath + ":" + std::to_string(m_Cur.m_Line) +
+                                                 ": expected type name in srinput scope");
+                    Token typeName = m_Cur; Advance();
+
+                    // Check if the type exists and is a cbuffer
+                    // First, look in m_StructMap (user-defined structs)
+                    // Then, check if it's a cbuffer type in m_Result.m_BufferDefs
+                    bool bIsCBufferType = false;
+                    
+                    // Search through BufferDefs to see if this is a cbuffer name
+                    for (const auto& bufDef : m_Result.m_BufferDefs)
+                    {
+                        if (bufDef.m_Name == typeName.m_Text)
+                        {
+                            bIsCBufferType = true;
+                            break;
+                        }
+                    }
+
+                    if (!bIsCBufferType)
+                    {
+                        throw std::runtime_error(m_FilePath + ":" + std::to_string(typeName.m_Line) +
+                                                 ": srinput scope only allows cbuffer types; '" +
+                                                 typeName.m_Text + "' is not a cbuffer");
+                    }
+
+                    Token memberName = Expect(TokKind::Ident, "member name in srinput");
+                    Expect(TokKind::Semicolon, ";");
+
+                    SrInputMember member;
+                    member.m_CBufferName = typeName.m_Text;
+                    member.m_MemberName  = memberName.m_Text;
+                    srInputDef.m_Members.push_back(std::move(member));
+                }
+
+                Expect(TokKind::RBrace, "}");
+                Expect(TokKind::Semicolon, ";");
+
+                m_Result.m_SrInputDefs.push_back(std::move(srInputDef));
+                continue;
+            }
+
             // ---- typedef (skipped) ----
             if (kw == "typedef")
             {
@@ -761,8 +823,8 @@ static ParseResult ParseFileInternal(const std::string& path)
     Parser p(ss.str(), result, path);
     p.Parse();
 
-    LogMsg("[parser] Done: %zu structs, %zu buffers\n",
-           result.m_Structs.size(), result.m_Buffers.size());
+    LogMsg("[parser] Done: %zu structs, %zu buffers, %zu srinput(s)\n",
+           result.m_Structs.size(), result.m_Buffers.size(), result.m_SrInputDefs.size());
     return result;
 }
 

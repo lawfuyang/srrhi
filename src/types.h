@@ -73,10 +73,33 @@ struct StructType
 };
 
 // ---------------------------------------------------------------------------
+// SrInputMember: a member within an srinput scope (cbuffer reference)
+//   m_CBufferName – name of the cbuffer type being referenced
+//   m_MemberName  – variable name for this member
+// ---------------------------------------------------------------------------
+struct SrInputMember
+{
+    std::string m_CBufferName;
+    std::string m_MemberName;
+};
+
+// ---------------------------------------------------------------------------
+// SrInputDef: srinput scope containing cbuffer references
+//   m_Name  – name of the srinput scope
+//   m_Members – list of cbuffer references, order determines register assignment
+// ---------------------------------------------------------------------------
+struct SrInputDef
+{
+    std::string               m_Name;
+    std::vector<SrInputMember> m_Members;
+};
+
+// ---------------------------------------------------------------------------
 // ParseResult: result of parsing a .sr file (and its transitive includes).
 //   structs     – named struct definitions referenceable by field types
 //   bufferDefs  – struct definitions for cbuffers / sbuffers (not referenceable)
 //   buffers     – global buffer variables; each type points into bufferDefs
+//   SrInputDefs – srinput scope definitions (group cbuffers with registers)
 //
 //   NOTE: structs and bufferDefs use std::deque so that StructType* pointers
 //   stored in TypeRefs remain valid even as the containers grow during
@@ -87,6 +110,7 @@ struct ParseResult
     std::deque<StructType>      m_Structs;
     std::deque<StructType>      m_BufferDefs;
     std::vector<MemberVariable> m_Buffers;
+    std::vector<SrInputDef>     m_SrInputDefs;
     std::string                 m_SourceFile;
 };
 

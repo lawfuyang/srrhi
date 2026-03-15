@@ -3,3 +3,8 @@ cbuffer ExampleArrays {
    float array[2];
    float2 after;
 };
+
+srinput MainInputs
+{
+    ExampleArrays m_arrays;
+};

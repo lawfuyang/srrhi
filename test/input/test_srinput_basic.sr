@@ -1,0 +1,16 @@
+cbuffer FrameConsts
+{
+    float4x4 m_Matrix;
+    float    m_Time;
+};
+
+cbuffer PassConsts
+{
+    uint m_PassIdx;
+};
+
+srinput BasePassInputs
+{
+    FrameConsts m_FrameConsts;
+    PassConsts m_PassConsts;
+};

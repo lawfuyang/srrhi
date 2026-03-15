@@ -5,3 +5,8 @@ cbuffer ExampleScalarAlignment {
    double lorg;
    bool four_bytes;
 };
+
+srinput MainInputs
+{
+    ExampleScalarAlignment m_scalarAlignment;
+};

@@ -49,6 +49,7 @@ static const std::unordered_set<std::string> k_ExpectedFailStems = {
     "test_undefined_struct",
     "test_packoffset",
     "test_pragma_pack",
+    "test_srinput_invalid",
 };
 
 // ---------------------------------------------------------------------------

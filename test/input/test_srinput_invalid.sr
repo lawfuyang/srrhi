@@ -1,0 +1,17 @@
+// This test should fail - srinput cannot contain non-cbuffer types
+
+struct MyStruct
+{
+    float4 position;
+};
+
+cbuffer ValidCBuffer
+{
+    float time;
+};
+
+srinput InvalidInputs
+{
+    MyStruct m_invalid;  // ERROR: not a cbuffer!
+    ValidCBuffer m_valid;
+};

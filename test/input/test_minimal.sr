@@ -4,3 +4,8 @@ cbuffer cb
     float4x4 g_mvp;
     float    g_time;
 };
+
+srinput MainInputs
+{
+    cb m_cb;
+};

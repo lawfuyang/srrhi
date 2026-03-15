@@ -5,3 +5,8 @@ cbuffer Test
     float  radius;
     float4 color;
 };
+
+srinput MainInputs
+{
+    Test m_test;
+};

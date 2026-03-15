@@ -14,3 +14,8 @@ cbuffer example {
     vector<double,1> dv;
     uint16_t u;
 };
+
+srinput MainInputs
+{
+    example m_example;
+};

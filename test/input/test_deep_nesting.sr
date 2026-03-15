@@ -21,3 +21,8 @@ cbuffer StressDeepNest {
     float extraScalar;
     float2 extraVec;
 };
+
+srinput MainInputs
+{
+    StressDeepNest m_deepNesting;
+};

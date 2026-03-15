@@ -6,3 +6,8 @@ cbuffer BadCB2
     float f;
 };
 #pragma pack()
+
+srinput MainInputs
+{
+    BadCB2 m_badcb2;
+};

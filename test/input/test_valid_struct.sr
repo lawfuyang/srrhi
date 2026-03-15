@@ -11,3 +11,8 @@ cbuffer valid_cb
     float extra;
     ValidStruct array[5];
 };
+
+srinput MainInputs
+{
+    valid_cb m_validCb;
+};

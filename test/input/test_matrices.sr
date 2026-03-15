@@ -3,3 +3,8 @@ cbuffer ExampleMatrices {
    float2x3 mat;
    float2x1 smol_mat;
 };
+
+srinput MainInputs
+{
+    ExampleMatrices m_matrices;
+};

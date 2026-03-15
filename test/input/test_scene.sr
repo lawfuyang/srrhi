@@ -19,3 +19,8 @@ cbuffer SceneConstants
     float   g_DeltaTime;
     float   pad0[2];            // explicit padding test
 };
+
+srinput MainInputs
+{
+    SceneConstants m_scene;
+};

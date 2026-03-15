@@ -4,3 +4,8 @@ cbuffer ExampleBufferRows {
    uint index;
    double4 d;
 };
+
+srinput MainInputs
+{
+    ExampleBufferRows m_bufferRows;
+};

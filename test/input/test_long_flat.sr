@@ -5,3 +5,8 @@ cbuffer StressLongFlat {
     float4 vectors[64];
     float  trailing[17];        // odd length to force final padding
 };
+
+srinput MainInputs
+{
+    StressLongFlat m_longFlat;
+};

@@ -12,3 +12,8 @@ cbuffer StressMassiveArray {
     float globalTime;
     int frameIndex;
 };
+
+srinput MainInputs
+{
+    StressMassiveArray m_massiveArray;
+};

@@ -1,6 +1,7 @@
 ﻿#include "types.h"
 #include <sstream>
 #include <stdexcept>
+#include <unordered_set>
 
 // ---------------------------------------------------------------------------
 // C++ type mapping from BuiltinType
@@ -331,25 +332,47 @@ std::string GenerateCpp(const ParseResult& pr,
 
     // Named struct definitions
     for (const auto& st : pr.m_Structs)
-        EmitStructCpp(out, st, padCount);
-
-    // cbuffer as alignas(16) structs with full byte-exact layout
-    size_t layoutIdx = 0;
-    for (const auto& bufMv : pr.m_Buffers)
     {
-        if (!bufMv.m_bIsCBuffer) continue;
-        auto* sp = std::get_if<StructType*>(&bufMv.m_Type);
-        if (!sp || !*sp) continue;
-
-        if (layoutIdx >= layouts.size()) continue;
-        const LayoutMember& lm = layouts[layoutIdx++];
-        const StructType& st   = **sp;
-
-        out << "struct alignas(16) " << st.m_Name << "\n{\n";
-        EmitMembersCpp(out, st.m_Members, lm.m_Submembers, padCount, "    ");
-        out << "};\n\n";
+        int localPadCount = 0;
+        EmitStructCpp(out, st, localPadCount);
     }
 
-    LogMsg("[cpp_gen] Done (padCount=%d)\n", padCount);
+    // Build a set of cbuffer names that are in srinput scopes
+    std::unordered_set<std::string> cbuffersInSrInput;
+    for (const auto& srInputDef : pr.m_SrInputDefs)
+    {
+        for (const auto& member : srInputDef.m_Members)
+        {
+            cbuffersInSrInput.insert(member.m_CBufferName);
+        }
+    }
+
+    // Emit cbuffer structs (only for those in srinput scopes)
+    for (const auto& bufDef : pr.m_BufferDefs)
+    {
+        if (cbuffersInSrInput.count(bufDef.m_Name))
+        {
+            // Find the corresponding layout to include padding
+            const LayoutMember* bufLayout = nullptr;
+            for (const auto& lm : layouts)
+            {
+                if (lm.m_Name == bufDef.m_Name)
+                {
+                    bufLayout = &lm;
+                    break;
+                }
+            }
+
+            if (bufLayout)
+            {
+                int localPadCount = 0;
+                out << "struct alignas(16) " << bufDef.m_Name << "\n{\n";
+                EmitMembersCpp(out, bufDef.m_Members, bufLayout->m_Submembers, localPadCount, "    ");
+                out << "};\n\n";
+            }
+        }
+    }
+
+    LogMsg("[cpp_gen] Done\n");
     return out.str();
 }

@@ -10,3 +10,8 @@ cbuffer StressAlignment {
     bool   bArray[9];           // each bool = 4 bytes
     float  finalScalar;
 };
+
+srinput MainInputs
+{
+    StressAlignment m_alignment;
+};
