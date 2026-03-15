@@ -58,8 +58,11 @@ static CppTypeInfo MapBuiltinToCpp(const BuiltinType& bt)
 
 // ---------------------------------------------------------------------------
 // Map float matrices to DirectX matrix types when applicable
+// Returns empty string if size doesn't match (use byte array instead)
+// Params: arr - the array node representing the matrix
+//         computedSize - the size from the layout engine (0 = skip size check for named structs)
 // ---------------------------------------------------------------------------
-static std::string MapMatrixType(const ArrayNode& arr)
+static std::string MapMatrixType(const ArrayNode& arr, int computedSize)
 {
     // Check if this is a float4x4 (or similar standard DirectX matrix)
     if (!arr.m_bCreatedFromMatrix)
@@ -74,11 +77,22 @@ static std::string MapMatrixType(const ArrayNode& arr)
         // Check for float-based matrices
         if ((sc == "float" || sc == "float32_t"))
         {
-            // Map to DirectX types
-            if (rows == 3 && cols == 3) return "DirectX::XMFLOAT3X3";
-            if (rows == 4 && cols == 3) return "DirectX::XMFLOAT4X3";
-            if (rows == 3 && cols == 4) return "DirectX::XMFLOAT3X4";
-            if (rows == 4 && cols == 4) return "DirectX::XMFLOAT4X4";
+            // Define expected sizes for DirectX matrix types
+            int expectedSize = 0;
+            std::string matrixType;
+            
+            if (rows == 3 && cols == 3) { expectedSize = 36; matrixType = "DirectX::XMFLOAT3X3"; }
+            else if (rows == 4 && cols == 3) { expectedSize = 48; matrixType = "DirectX::XMFLOAT4X3"; }
+            else if (rows == 3 && cols == 4) { expectedSize = 48; matrixType = "DirectX::XMFLOAT3X4"; }
+            else if (rows == 4 && cols == 4) { expectedSize = 64; matrixType = "DirectX::XMFLOAT4X4"; }
+            
+            // For cbuffer context (computedSize != 0): only use DirectX type if size matches
+            // For named struct context (computedSize == 0): always use DirectX type if rows/cols match
+            if (expectedSize > 0)
+            {
+                if (computedSize == 0 || computedSize == expectedSize)
+                    return matrixType;
+            }
         }
     }
     return "";
@@ -87,14 +101,18 @@ static std::string MapMatrixType(const ArrayNode& arr)
 static void EmitPadding(std::ostringstream& out, int padBytes, int& padCount,
                         const std::string& ind)
 {
+    // Emit padding fields to maintain std140 cbuffer layout alignment.
+    // std140 has specific alignment rules: scalars align to 4 bytes, vectors to 16 bytes,
+    // arrays to their element's packed size with additional rounding, etc.
+    // These padding fields ensure the struct layout matches the HLSL cbuffer exactly.
     if (padBytes <= 0) return;
     while (padBytes >= 4)
     {
-        out << ind << "uint32_t pad" << padCount++ << ";\n";
+        out << ind << "uint32_t pad" << padCount++ << ";  // std140 alignment padding\n";
         padBytes -= 4;
     }
     if (padBytes == 2)
-        out << ind << "uint16_t pad" << padCount++ << ";\n";
+        out << ind << "uint16_t pad" << padCount++ << ";  // std140 alignment padding\n";
     else if (padBytes != 0)
         out << ind << "// WARNING: " << padBytes << " unaccounted byte(s)\n";
 }
@@ -128,29 +146,15 @@ static void EmitMembersCpp(std::ostringstream& out,
         {
             if (!lm) { cursor = fieldOffset; continue; }
 
-            // Check if this is an array of structs (layout node is an array)
-            bool bIsArray = std::holds_alternative<std::shared_ptr<ArrayNode>>(lm->m_Type);
-            if (bIsArray)
-            {
-                // Expand each array element as a separate struct member
-                for (size_t e = 0; e < lm->m_Submembers.size(); ++e)
-                {
-                    const LayoutMember& elem = lm->m_Submembers[e];
-                    std::string eName = mv.m_Name + "_" + std::to_string(e);
-                    out << ind << (*sp)->m_Name << " " << eName << ";\n";
-                    if (elem.m_Padding > 0)
-                        EmitPadding(out, elem.m_Padding, padCount, ind);
-                    cursor = elem.m_Offset + elem.m_Size + elem.m_Padding;
-                }
-            }
-            else
-            {
-                // Single struct member
-                out << ind << (*sp)->m_Name << " " << mv.m_Name << ";\n";
-                if (lm->m_Padding > 0)
-                    EmitPadding(out, lm->m_Padding, padCount, ind);
-                cursor = lm->m_Offset + lm->m_Size + lm->m_Padding;
-            }
+            // Emit struct fields as byte arrays to match std140 cbuffer layout rules.
+            // std140 layout may add implicit padding within and after struct members;
+            // the computed size includes this padding. Using a byte array guarantees
+            // the layout matches the HLSL cbuffer without relying on C++ struct alignment.
+            // To initialize: create a real instance and use std::memcpy() to copy bytes.
+            out << ind << "uint8_t " << mv.m_Name << "[" << lm->m_Size << "];\n";
+            if (lm->m_Padding > 0)
+                EmitPadding(out, lm->m_Padding, padCount, ind);
+            cursor = lm->m_Offset + lm->m_Size + lm->m_Padding;
             continue;
         }
 
@@ -166,7 +170,7 @@ static void EmitMembersCpp(std::ostringstream& out,
             if (arr.m_bCreatedFromMatrix)
             {
                 // Try to map to DirectX matrix type
-                std::string matrixType = MapMatrixType(arr);
+                std::string matrixType = MapMatrixType(arr, lm->m_Size);
                 
                 if (!matrixType.empty())
                 {
@@ -178,62 +182,26 @@ static void EmitMembersCpp(std::ostringstream& out,
                 }
                 else
                 {
-                    // Matrix: emit column-by-column (for non-standard matrices)
-                    const BuiltinType* elemBt = std::get_if<BuiltinType>(&arr.m_ElementType);
-                    if (elemBt)
-                    {
-                        auto cti = MapBuiltinToCpp(*elemBt);
-                        int colDataElems = elemBt->m_VectorSize;
-                        int elemsPerSlot = 16 / elemBt->m_ElementSize;
-
-                        for (size_t c = 0; c < lm->m_Submembers.size(); ++c)
-                        {
-                            const LayoutMember& col = lm->m_Submembers[c];
-                            bool bLastCol = (c == lm->m_Submembers.size() - 1);
-                            std::string colName = mv.m_Name + "_c" + std::to_string(c);
-
-                            if (bLastCol)
-                                out << ind << cti.m_TypeName << " " << colName << "[" << colDataElems << "];\n";
-                            else
-                                out << ind << cti.m_TypeName << " " << colName << "[" << elemsPerSlot << "];\n";
-
-                            if (!bLastCol && col.m_Padding > 0)
-                                EmitPadding(out, col.m_Padding, padCount, ind);
-                            cursor = col.m_Offset + col.m_Size + (bLastCol ? lm->m_Padding : col.m_Padding);
-                        }
-                        if (lm->m_Padding > 0)
-                            EmitPadding(out, lm->m_Padding, padCount, ind);
-                        cursor = lm->m_Offset + lm->m_Size + lm->m_Padding;
-                    }
+                    // Matrix: emit as byte array to match std140 layout.
+                    // Non-standard matrix dimensions (e.g., 60-byte matrices) don't map to
+                    // DirectX::XMFLOAT types. This byte array ensures the layout matches exactly.
+                    // To initialize: create a real matrix type and use std::memcpy() to copy bytes.
+                    out << ind << "uint8_t " << mv.m_Name << "[" << lm->m_Size << "];  // std140 matrix padding\n";
+                    if (lm->m_Padding > 0)
+                        EmitPadding(out, lm->m_Padding, padCount, ind);
+                    cursor = lm->m_Offset + lm->m_Size + lm->m_Padding;
                 }
             }
             else
             {
-                // Regular array: expand per element
-                for (size_t e = 0; e < lm->m_Submembers.size(); ++e)
-                {
-                    const LayoutMember& elem = lm->m_Submembers[e];
-                    bool bLastElem = (e == lm->m_Submembers.size() - 1);
-
-                    if (auto* elemBt = std::get_if<BuiltinType>(&elem.m_Type))
-                    {
-                        auto cti = MapBuiltinToCpp(*elemBt);
-                        std::string eName = mv.m_Name + "_" + std::to_string(e);
-                        out << ind << cti.m_TypeName << " " << eName;
-                        if (cti.m_ArrayMult > 0)
-                            out << "[" << cti.m_ArrayMult << "]";
-                        out << ";\n";
-                    }
-                    else if (auto* elemSp = std::get_if<StructType*>(&elem.m_Type))
-                    {
-                        std::string eName = mv.m_Name + "_" + std::to_string(e);
-                        out << ind << (*elemSp)->m_Name << " " << eName << ";\n";
-                    }
-
-                    if (!bLastElem && elem.m_Padding > 0)
-                        EmitPadding(out, elem.m_Padding, padCount, ind);
-                    cursor = elem.m_Offset + elem.m_Size + (bLastElem ? 0 : elem.m_Padding);
-                }
+                // Regular array: emit as byte array to match std140 layout.
+                // In std140, array elements are padded as if each is a struct member.
+                // For example, a float[4] takes 64 bytes (each element at 16-byte boundary),
+                // not 16 bytes. Using a byte array preserves the exact computed layout.
+                // To initialize: create a real array and use std::memcpy() to copy bytes.
+                out << ind << "uint8_t " << mv.m_Name << "[" << lm->m_Size << "];  // std140 array padding\n";
+                if (lm->m_Padding > 0)
+                    EmitPadding(out, lm->m_Padding, padCount, ind);
                 cursor = lm->m_Offset + lm->m_Size + lm->m_Padding;
             }
         }
@@ -282,7 +250,8 @@ static void EmitStructCpp(std::ostringstream& out, const StructType& st,
             if (arr.m_bCreatedFromMatrix)
             {
                 // Try to map to DirectX matrix type
-                std::string matrixType = MapMatrixType(arr);
+                // Note: For named structs, we don't have computed layout sizes, so pass 0 (no size verification)
+                std::string matrixType = MapMatrixType(arr, 0);
                 
                 if (!matrixType.empty())
                 {

@@ -97,13 +97,35 @@ add_executable(${PROJECT_NAME} ${SOURCES})
 target_include_directories(${PROJECT_NAME} PRIVATE "${DXC_INSTALL_DIR}/inc")
 target_link_libraries(${PROJECT_NAME} PRIVATE "${DXC_INSTALL_DIR}/lib/x64/dxcompiler.lib" "${DXC_INSTALL_DIR}/lib/x64/dxil.lib")
 
-# Custom test target for running internal unit tests
-add_custom_target(test_srrhi
-    COMMAND ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/srrhi.exe
-        -i "${CMAKE_SOURCE_DIR}/test/input"
-        -o "${CMAKE_SOURCE_DIR}/test/output"
-        --test
-    DEPENDS ${PROJECT_NAME}
-    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-    COMMENT "Running srrhi unit tests..."
-)
+# ============================================================================
+# Validation executables: each generated header gets its own validation binary
+# Checks for C++ compilation errors and validates struct layouts per header
+# 
+# Usage:
+#   1. Run: cd bin && .\srrhi.exe -i ..\test\input -o ..\test\output --test
+#   2. Run: cd .. && python generate_validation.py  
+#   3. Build target: ALL_BUILD (builds all validation targets)
+#   4. Run any validation executable: .\bin\validation_test_arrays.exe, etc.
+# ============================================================================
+
+# Find all validation_*.cpp files
+file(GLOB VALIDATION_SOURCES "${CMAKE_SOURCE_DIR}/test/output/cpp/validation_*.cpp")
+
+# Create an executable for each validation file
+foreach(VALIDATION_FILE ${VALIDATION_SOURCES})
+    get_filename_component(FILENAME ${VALIDATION_FILE} NAME)
+    string(REPLACE ".cpp" "" TARGET_NAME ${FILENAME})
+    
+    add_executable(${TARGET_NAME} ${VALIDATION_FILE})
+    
+    target_include_directories(${TARGET_NAME} 
+        PRIVATE "${CMAKE_SOURCE_DIR}/test/output/cpp"
+        PRIVATE "${DXC_INSTALL_DIR}/inc"
+    )
+    
+    set_target_properties(${TARGET_NAME} PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
+    )
+    
+    message(STATUS "Created validation target: ${TARGET_NAME}")
+endforeach()

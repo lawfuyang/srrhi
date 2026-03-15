@@ -22,6 +22,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <fstream>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -384,6 +385,101 @@ static bool CompareWithReflection(
 }
 
 // ---------------------------------------------------------------------------
+// Export reflection data to JSON for use by validation generators.
+// This allows generated C++ tests to validate offsets against DXC reflection.
+// Includes both DXC-reflected wrapper struct info and computed layout info.
+// ---------------------------------------------------------------------------
+static void ExportReflectionDataJson(
+    const fs::path&                           outputPath,
+    const std::string&                        srFileName,
+    const std::vector<LayoutMember>&          layouts,
+    const std::vector<ReflectedCBuffer>&      reflected)
+{
+    std::ofstream out(outputPath, std::ios::app);
+    if (!out.is_open())
+        throw std::runtime_error("Failed to open reflection export file: " + outputPath.string());
+
+    // Export as JSON (manually constructed for simplicity)
+    
+    static bool first = true;
+    if (first)
+    {
+        out << "[\n";
+        first = false;
+    }
+    else
+    {
+        out << ",\n";
+    }
+
+    out << "  {\n"
+        << "    \"file\": \"" << srFileName << "\",\n"
+        << "    \"computedLayouts\": [\n";
+
+    // Export computed layout information
+    bool firstLayout = true;
+    for (const auto& layout : layouts)
+    {
+        if (!firstLayout) out << ",\n";
+        out << "      {\n"
+            << "        \"name\": \"" << layout.m_Name << "\",\n"
+            << "        \"totalSize\": " << layout.m_Size << ",\n"
+            << "        \"members\": [\n";
+
+        bool firstMember = true;
+        for (const auto& member : layout.m_Submembers)
+        {
+            if (!firstMember) out << ",\n";
+            out << "          {\n"
+                << "            \"name\": \"" << member.m_Name << "\",\n"
+                << "            \"offset\": " << member.m_Offset << ",\n"
+                << "            \"size\": " << member.m_Size << "\n"
+                << "          }";
+            firstMember = false;
+        }
+
+        out << "\n        ]\n"
+            << "      }";
+        firstLayout = false;
+    }
+
+    out << "\n    ],\n"
+        << "    \"dxcReflection\": [\n";
+
+    // Export DXC reflection information
+    bool firstCb = true;
+    for (const auto& rcb : reflected)
+    {
+        if (!firstCb) out << ",\n";
+        out << "      {\n"
+            << "        \"name\": \"" << rcb.m_Name << "\",\n"
+            << "        \"totalSize\": " << rcb.m_TotalSize << ",\n"
+            << "        \"vars\": [\n";
+
+        bool firstVar = true;
+        for (const auto& rv : rcb.m_Vars)
+        {
+            if (!firstVar) out << ",\n";
+            out << "          {\n"
+                << "            \"name\": \"" << rv.m_Name << "\",\n"
+                << "            \"offset\": " << rv.m_Offset << ",\n"
+                << "            \"size\": " << rv.m_Size << "\n"
+                << "          }";
+            firstVar = false;
+        }
+
+        out << "\n        ]\n"
+            << "      }";
+        firstCb = false;
+    }
+
+    out << "\n    ]\n"
+        << "  }";
+    
+    out.flush();
+}
+
+// ---------------------------------------------------------------------------
 // Public entry point
 // ---------------------------------------------------------------------------
 int RunReflectionTests(const fs::path& testInputDir)
@@ -402,6 +498,17 @@ int RunReflectionTests(const fs::path& testInputDir)
     hr = DxcCreateInstance(CLSID_DxcCompiler, IID_PPV_ARGS(&pCompiler));
     if (FAILED(hr))
         throw std::runtime_error("Failed to create IDxcCompiler3");
+
+    // ---- Prepare reflection export file ------------------------------------
+    fs::path outputDir = testInputDir.parent_path() / "output" / "cpp";
+    fs::create_directories(outputDir);
+    fs::path reflectionExportPath = outputDir / "reflection_data.json";
+    
+    // Write opening bracket
+    {
+        std::ofstream out(reflectionExportPath);
+        out.close();  // Clear the file
+    }
 
     // ---- Collect .sr files -------------------------------------------------
     std::vector<fs::path> srFiles;
@@ -542,6 +649,16 @@ int RunReflectionTests(const fs::path& testInputDir)
             LogMsg("[test]   PASS\n");
             LogMsg("%s", report.str().c_str());
             ++passed;
+            
+            // Export reflection data for validation generators
+            try
+            {
+                ExportReflectionDataJson(reflectionExportPath, srFile.filename().string(), layouts, reflected);
+            }
+            catch (const std::exception& e)
+            {
+                LogMsg("[test]   WARNING: Failed to export reflection data: %s\n", e.what());
+            }
         }
         else
         {
@@ -554,6 +671,14 @@ int RunReflectionTests(const fs::path& testInputDir)
     LogMsg("\n[test] ==========================================\n");
     LogMsg("[test] Results: %d passed, %d failed, %d skipped\n",
            passed, failed, skipped);
+    
+    // ---- Finalize reflection export ----------------------------------------
+    {
+        std::ofstream out(reflectionExportPath, std::ios::app);
+        out << "\n]\n";
+        out.close();
+        LogMsg("[test] Reflection data exported to: %s\n", reflectionExportPath.string().c_str());
+    }
 
     return (failed == 0) ? 0 : 1;
 }
