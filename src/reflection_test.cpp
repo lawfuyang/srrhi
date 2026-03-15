@@ -59,16 +59,16 @@ static const std::unordered_set<std::string> k_ExpectedFailStems = {
 // ---------------------------------------------------------------------------
 struct ReflectedVar
 {
-    std::string name;
-    uint32_t    offset = 0;
-    uint32_t    size   = 0;
+    std::string m_Name;
+    uint32_t    m_Offset = 0;
+    uint32_t    m_Size   = 0;
 };
 
 struct ReflectedCBuffer
 {
-    std::string               name;
-    uint32_t                  totalSize = 0;  // D3D12_SHADER_BUFFER_DESC::Size
-    std::vector<ReflectedVar> vars;
+    std::string               m_Name;
+    uint32_t                  m_TotalSize = 0;  // D3D12_SHADER_BUFFER_DESC::Size
+    std::vector<ReflectedVar> m_Vars;
 };
 
 // ---------------------------------------------------------------------------
@@ -270,8 +270,8 @@ static std::vector<ReflectedCBuffer> CompileAndReflect(
         if (FAILED(pCB->GetDesc(&cbDesc))) continue;
 
         ReflectedCBuffer rcb;
-        rcb.name      = cbDesc.Name ? cbDesc.Name : "";
-        rcb.totalSize = cbDesc.Size;
+        rcb.m_Name      = cbDesc.Name ? cbDesc.Name : "";
+        rcb.m_TotalSize = cbDesc.Size;
 
         for (UINT vi = 0; vi < cbDesc.Variables; ++vi)
         {
@@ -287,10 +287,10 @@ static std::vector<ReflectedCBuffer> CompileAndReflect(
             if (IsGeneratedPadding(varName, ourMembers)) continue;
 
             ReflectedVar rv;
-            rv.name   = varName;
-            rv.offset = varDesc.StartOffset;
-            rv.size   = varDesc.Size;
-            rcb.vars.push_back(rv);
+            rv.m_Name   = varName;
+            rv.m_Offset = varDesc.StartOffset;
+            rv.m_Size   = varDesc.Size;
+            rcb.m_Vars.push_back(rv);
         }
 
         result.push_back(std::move(rcb));
@@ -317,7 +317,7 @@ static bool CompareWithReflection(
         // Find matching reflected cbuffer by name
         const ReflectedCBuffer* pRcb = nullptr;
         for (const auto& rcb : reflected)
-            if (rcb.name == cbName) { pRcb = &rcb; break; }
+            if (rcb.m_Name == cbName) { pRcb = &rcb; break; }
 
         if (!pRcb)
         {
@@ -330,17 +330,17 @@ static bool CompareWithReflection(
         // --- Total cbuffer size ---
         // Our size rounded up to 16 bytes must match DXC's reported size.
         int ourRounded = (cbLayout.m_Size + 15) & ~15;
-        if (ourRounded != static_cast<int>(pRcb->totalSize))
+        if (ourRounded != static_cast<int>(pRcb->m_TotalSize))
         {
             report << "    [FAIL] cbuffer '" << cbName << "' total size: "
                    << "ours=" << ourRounded
-                   << " dxc=" << pRcb->totalSize << "\n";
+                   << " dxc=" << pRcb->m_TotalSize << "\n";
             ok = false;
         }
         else
         {
             report << "    [OK]   cbuffer '" << cbName
-                   << "' total size = " << pRcb->totalSize << " bytes\n";
+                   << "' total size = " << pRcb->m_TotalSize << " bytes\n";
         }
 
         // --- Check struct member wrapper ---
@@ -350,23 +350,23 @@ static bool CompareWithReflection(
         
         // Check if the expected struct member exists in DXC reflection
         bool foundStructMember = false;
-        for (const auto& rv : pRcb->vars)
+        for (const auto& rv : pRcb->m_Vars)
         {
-            if (rv.name == expectedStructMember)
+            if (rv.m_Name == expectedStructMember)
             {
                 foundStructMember = true;
                 // The struct member should be at offset 0
-                if (rv.offset != 0)
+                if (rv.m_Offset != 0)
                 {
                     report << "    [FAIL] struct member '" << cbName << "::" 
                            << expectedStructMember << "' offset: "
-                           << "ours=0 dxc=" << rv.offset << "\n";
+                           << "ours=0 dxc=" << rv.m_Offset << "\n";
                     ok = false;
                 }
                 else
                 {
                     report << "    [OK]   struct member '" << cbName << "::" 
-                           << expectedStructMember << "' offset=0 size=" << rv.size << "\n";
+                           << expectedStructMember << "' offset=0 size=" << rv.m_Size << "\n";
                 }
                 break;
             }
