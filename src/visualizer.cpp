@@ -1,4 +1,4 @@
-﻿#include "types.h"
+#include "types.h"
 #include <sstream>
 #include <iomanip>
 
@@ -69,34 +69,34 @@ struct VisualizerState
 
 // Forward declaration
 static void visitMember(VisualizerState& vs, const LayoutMember& m,
-                        bool parentIsMatrix);
+                        bool bParentIsMatrix);
 
 // Visit all submembers of a node (struct or array contents)
 static void visitSubmembers(VisualizerState& vs, const LayoutMember& parent)
 {
-    bool isMatrix = false;
-    if (auto* ap = std::get_if<std::shared_ptr<ArrayNode>>(&parent.type))
-        isMatrix = (*ap)->created_from_matrix;
+    bool bIsMatrix = false;
+    if (auto* ap = std::get_if<std::shared_ptr<ArrayNode>>(&parent.m_Type))
+        bIsMatrix = (*ap)->m_bCreatedFromMatrix;
 
-    for (auto& sub : parent.submembers)
-        visitMember(vs, sub, isMatrix);
+    for (auto& sub : parent.m_Submembers)
+        visitMember(vs, sub, bIsMatrix);
 }
 
 static void visitMember(VisualizerState& vs, const LayoutMember& m,
-                        bool parentIsMatrix)
+                        bool bParentIsMatrix)
 {
     // --- BuiltinType leaf ---
-    if (std::holds_alternative<BuiltinType>(m.type))
+    if (std::holds_alternative<BuiltinType>(m.m_Type))
     {
-        const auto& bt = std::get<BuiltinType>(m.type);
+        const auto& bt = std::get<BuiltinType>(m.m_Type);
         // Matrix columns have no trailing ";"
-        std::string label = m.name + (parentIsMatrix ? "" : ";");
-        vs.emitLeaf(bt.name, label, m.offset, m.size, m.padding);
+        std::string label = m.m_Name + (bParentIsMatrix ? "" : ";");
+        vs.emitLeaf(bt.m_Name, label, m.m_Offset, m.m_Size, m.m_Padding);
         return;
     }
 
     // --- ArrayNode (array or matrix) ---
-    if (auto* ap = std::get_if<std::shared_ptr<ArrayNode>>(&m.type))
+    if (auto* ap = std::get_if<std::shared_ptr<ArrayNode>>(&m.m_Type))
     {
         // Recurse: each element is a submember rendered by visitMember
         visitSubmembers(vs, m);
@@ -104,15 +104,15 @@ static void visitMember(VisualizerState& vs, const LayoutMember& m,
     }
 
     // --- StructType* (struct) ---
-    if (auto* sp = std::get_if<StructType*>(&m.type))
+    if (auto* sp = std::get_if<StructType*>(&m.m_Type))
     {
         const StructType* st = *sp;
-        std::string typeName = "struct " + st->name;
+        std::string typeName = "struct " + st->m_Name;
         vs.emitStructOpen(typeName);
-        for (auto& sub : m.submembers)
+        for (auto& sub : m.m_Submembers)
             visitMember(vs, sub, false);
-        std::string label = m.name + ";";
-        vs.emitStructClose(label, m.offset, m.size, m.padding);
+        std::string label = m.m_Name + ";";
+        vs.emitStructClose(label, m.m_Offset, m.m_Size, m.m_Padding);
         return;
     }
 }
@@ -120,20 +120,20 @@ static void visitMember(VisualizerState& vs, const LayoutMember& m,
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
-std::string visualizeLayouts(const std::vector<LayoutMember>& layouts)
+std::string VisualizeLayouts(const std::vector<LayoutMember>& layouts)
 {
-    logMsg("[visualizer] Generating visualization for %zu layout(s)...\n",
+    LogMsg("[visualizer] Generating visualization for %zu layout(s)...\n",
            layouts.size());
 
     VisualizerState vs;
 
     for (const auto& cbLayout : layouts)
     {
-        logMsg("[visualizer]   cbuffer: %s (%d bytes)\n",
-               cbLayout.name.c_str(), cbLayout.size);
+        LogMsg("[visualizer]   cbuffer: %s (%d bytes)\n",
+               cbLayout.m_Name.c_str(), cbLayout.m_Size);
 
         vs.out << std::string(21, ' ') << "offset |  size + pad\n";
-        vs.out << "cbuffer " << cbLayout.name << " {\n";
+        vs.out << "cbuffer " << cbLayout.m_Name << " {\n";
 
         vs.depth = 0;
         visitSubmembers(vs, cbLayout);
@@ -141,6 +141,6 @@ std::string visualizeLayouts(const std::vector<LayoutMember>& layouts)
         vs.out << "};\n\n";
     }
 
-    logMsg("[visualizer] Done\n");
+    LogMsg("[visualizer] Done\n");
     return vs.out.str();
 }

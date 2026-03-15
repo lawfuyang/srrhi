@@ -11,11 +11,11 @@ namespace fs = std::filesystem;
 // ---------------------------------------------------------------------------
 // Forward declarations
 // ---------------------------------------------------------------------------
-ParseResult parseFile(const std::string& path);
-std::vector<LayoutMember> computeLayouts(ParseResult& pr);
-std::string generateHlsl(const ParseResult& pr, const std::vector<LayoutMember>& layouts, int& padCount);
-std::string generateCpp(const ParseResult& pr, const std::vector<LayoutMember>& layouts, int& padCount);
-std::string visualizeLayouts(const std::vector<LayoutMember>& layouts);
+ParseResult ParseFile(const std::string& path);
+std::vector<LayoutMember> ComputeLayouts(ParseResult& pr);
+std::string GenerateHlsl(const ParseResult& pr, const std::vector<LayoutMember>& layouts, int& padCount);
+std::string GenerateCpp(const ParseResult& pr, const std::vector<LayoutMember>& layouts, int& padCount);
+std::string VisualizeLayouts(const std::vector<LayoutMember>& layouts);
 
 // ---------------------------------------------------------------------------
 // Custom deleter for FILE*
@@ -28,23 +28,23 @@ struct FileDeleter
 // ---------------------------------------------------------------------------
 // Global output handles
 // ---------------------------------------------------------------------------
-static std::unique_ptr<FILE, FileDeleter> g_log; // output.txt
-static std::unique_ptr<FILE, FileDeleter> g_vis; // visualizer_results.txt
+static std::unique_ptr<FILE, FileDeleter> g_Log; // output.txt
+static std::unique_ptr<FILE, FileDeleter> g_Vis; // visualizer_results.txt
 
-void logMsg(const char* fmt, ...)
+void LogMsg(const char* fmt, ...)
 {
-    if (!g_log) return;
+    if (!g_Log) return;
     va_list args;
     va_start(args, fmt);
-    vfprintf(g_log.get(), fmt, args);
+    vfprintf(g_Log.get(), fmt, args);
     va_end(args);
-    fflush(g_log.get());
+    fflush(g_Log.get());
 }
 
 // ---------------------------------------------------------------------------
 // Utility: write a string to a file, creating parent dirs as needed
 // ---------------------------------------------------------------------------
-static void writeFile(const fs::path& path, const std::string& content)
+static void WriteFile(const fs::path& path, const std::string& content)
 {
     try
     {
@@ -60,9 +60,9 @@ static void writeFile(const fs::path& path, const std::string& content)
     if (!f)
         throw std::runtime_error("Cannot open file for writing: " + path.string());
 
-    bool ok = (fwrite(content.c_str(), 1, content.size(), f) == content.size());
+    bool bOk = (fwrite(content.c_str(), 1, content.size(), f) == content.size());
     int closeErr = fclose(f);
-    if (!ok)
+    if (!bOk)
         throw std::runtime_error("Write error for file: " + path.string());
     if (closeErr != 0)
         throw std::runtime_error("Close error for file: " + path.string());
@@ -72,7 +72,7 @@ static void writeFile(const fs::path& path, const std::string& content)
 // Derive HLSL include-guard name from the output stem.
 // e.g. stem "sub/example" -> "EXAMPLE_HLSLI"
 // ---------------------------------------------------------------------------
-static std::string makeHlslGuard(const fs::path& stem)
+static std::string MakeHlslGuard(const fs::path& stem)
 {
     std::string name = stem.filename().string() + "_HLSLI";
     for (char& c : name)
@@ -83,35 +83,35 @@ static std::string makeHlslGuard(const fs::path& stem)
 // ---------------------------------------------------------------------------
 // Process one .sr file — throws on any unrecoverable error
 // ---------------------------------------------------------------------------
-static void processFile(const fs::path& srFile,
+static void ProcessFile(const fs::path& srFile,
                         const fs::path& inputRoot,
                         const fs::path& outputRoot,
                         int& globalPadCount)
 {
-    logMsg("[srrhi] Processing: %s\n", srFile.string().c_str());
+    LogMsg("[srrhi] Processing: %s\n", srFile.string().c_str());
 
     // --- Parse ---
     ParseResult pr;
     try
     {
-        pr = parseFile(srFile.string());
+        pr = ParseFile(srFile.string());
         long cbufferCount = 0;
-        for (auto& b : pr.buffers) if (b.isCBuffer) ++cbufferCount;
-        logMsg("  Parse OK: %ld cbuffer(s), %zu struct(s)\n",
-               cbufferCount, pr.structs.size());
+        for (auto& b : pr.m_Buffers) if (b.m_bIsCBuffer) ++cbufferCount;
+        LogMsg("  Parse OK: %ld cbuffer(s), %zu struct(s)\n",
+               cbufferCount, pr.m_Structs.size());
     }
     catch (const std::exception& e)
     {
-        logMsg("  ERROR (parse): %s\n", e.what());
+        LogMsg("  ERROR (parse): %s\n", e.what());
         throw std::runtime_error(
             std::string("Parse failed for '") + srFile.string() + "': " + e.what());
     }
 
-    bool hasCBuffers = false;
-    for (auto& b : pr.buffers) if (b.isCBuffer) { hasCBuffers = true; break; }
-    if (!hasCBuffers)
+    bool bHasCBuffers = false;
+    for (auto& b : pr.m_Buffers) if (b.m_bIsCBuffer) { bHasCBuffers = true; break; }
+    if (!bHasCBuffers)
     {
-        logMsg("  No cbuffers found in '%s', skipping.\n", srFile.string().c_str());
+        LogMsg("  No cbuffers found in '%s', skipping.\n", srFile.string().c_str());
         return;
     }
 
@@ -119,12 +119,12 @@ static void processFile(const fs::path& srFile,
     std::vector<LayoutMember> layouts;
     try
     {
-        layouts = computeLayouts(pr);
-        logMsg("  Layout OK: %zu layout(s) computed\n", layouts.size());
+        layouts = ComputeLayouts(pr);
+        LogMsg("  Layout OK: %zu layout(s) computed\n", layouts.size());
     }
     catch (const std::exception& e)
     {
-        logMsg("  ERROR (layout): %s\n", e.what());
+        LogMsg("  ERROR (layout): %s\n", e.what());
         throw std::runtime_error(
             std::string("Layout computation failed for '") + srFile.string() + "': " + e.what());
     }
@@ -132,19 +132,19 @@ static void processFile(const fs::path& srFile,
     // --- Visualizer ---
     try
     {
-        std::string vis = visualizeLayouts(layouts);
-        if (g_vis)
+        std::string vis = VisualizeLayouts(layouts);
+        if (g_Vis)
         {
-            fprintf(g_vis.get(), "=== %s ===\n", srFile.string().c_str());
-            fwrite(vis.c_str(), 1, vis.size(), g_vis.get());
-            fflush(g_vis.get());
+            fprintf(g_Vis.get(), "=== %s ===\n", srFile.string().c_str());
+            fwrite(vis.c_str(), 1, vis.size(), g_Vis.get());
+            fflush(g_Vis.get());
         }
-        logMsg("  Visualizer: written %zu bytes for %s\n",
+        LogMsg("  Visualizer: written %zu bytes for %s\n",
                vis.size(), srFile.filename().string().c_str());
     }
     catch (const std::exception& e)
     {
-        logMsg("  ERROR (visualizer): %s\n", e.what());
+        LogMsg("  ERROR (visualizer): %s\n", e.what());
         throw std::runtime_error(
             std::string("Visualizer failed for '") + srFile.string() + "': " + e.what());
     }
@@ -157,10 +157,10 @@ static void processFile(const fs::path& srFile,
     try
     {
         int padCount = globalPadCount;
-        std::string hlslContent = generateHlsl(pr, layouts, padCount);
+        std::string hlslContent = GenerateHlsl(pr, layouts, padCount);
 
         // Wrap with old-school include guard
-        std::string guard = makeHlslGuard(stem);
+        std::string guard = MakeHlslGuard(stem);
         hlslContent = "#ifndef " + guard + "\n"
                     + "#define " + guard + "\n"
                     + "\n"
@@ -169,13 +169,13 @@ static void processFile(const fs::path& srFile,
 
         fs::path hlslOut = outputRoot / "hlsl" / stem;
         hlslOut += ".hlsli";
-        writeFile(hlslOut, hlslContent);
-        logMsg("  HLSL  -> %s\n", hlslOut.string().c_str());
+        WriteFile(hlslOut, hlslContent);
+        LogMsg("  HLSL  -> %s\n", hlslOut.string().c_str());
         globalPadCount = padCount;
     }
     catch (const std::exception& e)
     {
-        logMsg("  ERROR (hlsl gen): %s\n", e.what());
+        LogMsg("  ERROR (hlsl gen): %s\n", e.what());
         throw std::runtime_error(
             std::string("HLSL generation failed for '") + srFile.string() + "': " + e.what());
     }
@@ -184,17 +184,17 @@ static void processFile(const fs::path& srFile,
     try
     {
         int padCount = globalPadCount;
-        std::string cppContent = generateCpp(pr, layouts, padCount);
+        std::string cppContent = GenerateCpp(pr, layouts, padCount);
 
         fs::path cppOut = outputRoot / "cpp" / stem;
         cppOut += ".h";
-        writeFile(cppOut, cppContent);
-        logMsg("  C++   -> %s\n", cppOut.string().c_str());
+        WriteFile(cppOut, cppContent);
+        LogMsg("  C++   -> %s\n", cppOut.string().c_str());
         globalPadCount = padCount;
     }
     catch (const std::exception& e)
     {
-        logMsg("  ERROR (cpp gen): %s\n", e.what());
+        LogMsg("  ERROR (cpp gen): %s\n", e.what());
         throw std::runtime_error(
             std::string("C++ generation failed for '") + srFile.string() + "': " + e.what());
     }
@@ -219,33 +219,33 @@ int main(int argc, char* argv[])
     // Open log file (output.txt in bin/)
     {
         fs::path logPath = binDir / "output.txt";
-        g_log.reset(fopen(logPath.string().c_str(), "w"));
-        if (!g_log)
+        g_Log.reset(fopen(logPath.string().c_str(), "w"));
+        if (!g_Log)
         {
             // Last resort: print to stderr since logging is unavailable
             fprintf(stderr, "[srrhi] FATAL: Cannot open log file: %s\n",
                     logPath.string().c_str());
             return 1;
         }
-        logMsg("[srrhi] Log opened: %s\n", logPath.string().c_str());
+        LogMsg("[srrhi] Log opened: %s\n", logPath.string().c_str());
     }
 
     // Open visualizer results file (visualizer_results.txt in bin/)
     {
         fs::path visPath = binDir / "visualizer_results.txt";
-        g_vis.reset(fopen(visPath.string().c_str(), "w"));
-        if (!g_vis)
+        g_Vis.reset(fopen(visPath.string().c_str(), "w"));
+        if (!g_Vis)
         {
-            logMsg("[srrhi] WARNING: Cannot open visualizer results file: %s — visualizer output will be skipped\n",
+            LogMsg("[srrhi] WARNING: Cannot open visualizer results file: %s — visualizer output will be skipped\n",
                    (binDir / "visualizer_results.txt").string().c_str());
         }
         else
         {
-            logMsg("[srrhi] Visualizer results file: %s\n", visPath.string().c_str());
+            LogMsg("[srrhi] Visualizer results file: %s\n", visPath.string().c_str());
         }
     }
 
-    logMsg("[srrhi] Started.\n");
+    LogMsg("[srrhi] Started.\n");
 
     // --- Parse arguments ---
     std::string inputDir;
@@ -257,35 +257,35 @@ int main(int argc, char* argv[])
         if (arg == "-i" && i + 1 < argc)
         {
             inputDir = argv[++i];
-            logMsg("[srrhi] Arg -i: %s\n", inputDir.c_str());
+            LogMsg("[srrhi] Arg -i: %s\n", inputDir.c_str());
         }
         else if (arg == "-o" && i + 1 < argc)
         {
             outputDir = argv[++i];
-            logMsg("[srrhi] Arg -o: %s\n", outputDir.c_str());
+            LogMsg("[srrhi] Arg -o: %s\n", outputDir.c_str());
         }
         else if (arg == "--help" || arg == "-h")
         {
-            logMsg("Usage: srrhi -i <input-dir> -o <output-dir>\n"
+            LogMsg("Usage: srrhi -i <input-dir> -o <output-dir>\n"
                    "  -i <dir>   Input folder (recursively scanned for .sr files)\n"
                    "  -o <dir>   Output folder (hlsl/ and cpp/ subfolders created)\n");
             return 0;
         }
         else
         {
-            logMsg("[srrhi] WARNING: Unknown argument ignored: %s\n", arg.c_str());
+            LogMsg("[srrhi] WARNING: Unknown argument ignored: %s\n", arg.c_str());
         }
     }
 
     if (inputDir.empty())
     {
-        logMsg("[srrhi] ERROR: -i <input-dir> is required.\n"
+        LogMsg("[srrhi] ERROR: -i <input-dir> is required.\n"
                "Usage: srrhi -i <input-dir> -o <output-dir>\n");
         return 1;
     }
     if (outputDir.empty())
     {
-        logMsg("[srrhi] ERROR: -o <output-dir> is required.\n"
+        LogMsg("[srrhi] ERROR: -o <output-dir> is required.\n"
                "Usage: srrhi -i <input-dir> -o <output-dir>\n");
         return 1;
     }
@@ -300,16 +300,16 @@ int main(int argc, char* argv[])
     }
     catch (const std::exception& e)
     {
-        logMsg("[srrhi] ERROR: Invalid path argument: %s\n", e.what());
+        LogMsg("[srrhi] ERROR: Invalid path argument: %s\n", e.what());
         return 1;
     }
 
-    logMsg("[srrhi] Input  dir: %s\n", inputRoot.string().c_str());
-    logMsg("[srrhi] Output dir: %s\n", outputRoot.string().c_str());
+    LogMsg("[srrhi] Input  dir: %s\n", inputRoot.string().c_str());
+    LogMsg("[srrhi] Output dir: %s\n", outputRoot.string().c_str());
 
     if (!fs::exists(inputRoot) || !fs::is_directory(inputRoot))
     {
-        logMsg("[srrhi] ERROR: Input directory does not exist: %s\n",
+        LogMsg("[srrhi] ERROR: Input directory does not exist: %s\n",
                inputRoot.string().c_str());
         return 1;
     }
@@ -323,24 +323,24 @@ int main(int argc, char* argv[])
             if (entry.is_regular_file() && entry.path().extension() == ".sr")
             {
                 srFiles.push_back(entry.path());
-                logMsg("[srrhi] Found: %s\n", entry.path().string().c_str());
+                LogMsg("[srrhi] Found: %s\n", entry.path().string().c_str());
             }
         }
     }
     catch (const std::exception& e)
     {
-        logMsg("[srrhi] ERROR: Failed to scan input directory '%s': %s\n",
+        LogMsg("[srrhi] ERROR: Failed to scan input directory '%s': %s\n",
                inputRoot.string().c_str(), e.what());
         return 1;
     }
 
     if (srFiles.empty())
     {
-        logMsg("[srrhi] No .sr files found in: %s\n", inputRoot.string().c_str());
+        LogMsg("[srrhi] No .sr files found in: %s\n", inputRoot.string().c_str());
         return 0;
     }
 
-    logMsg("[srrhi] Total: %zu .sr file(s) to process.\n\n", srFiles.size());
+    LogMsg("[srrhi] Total: %zu .sr file(s) to process.\n\n", srFiles.size());
 
     // --- Process each file ---
     int exitCode = 0;
@@ -350,26 +350,26 @@ int main(int argc, char* argv[])
     {
         try
         {
-            processFile(f, inputRoot, outputRoot, globalPadCount);
+            ProcessFile(f, inputRoot, outputRoot, globalPadCount);
         }
         catch (const std::exception& e)
         {
-            logMsg("[srrhi] FATAL ERROR processing '%s': %s\n",
+            LogMsg("[srrhi] FATAL ERROR processing '%s': %s\n",
                    f.string().c_str(), e.what());
             exitCode = 1;
             // Continue processing remaining files so all errors are logged
         }
         catch (...)
         {
-            logMsg("[srrhi] FATAL unknown error processing '%s'\n", f.string().c_str());
+            LogMsg("[srrhi] FATAL unknown error processing '%s'\n", f.string().c_str());
             exitCode = 1;
         }
     }
 
     if (exitCode == 0)
-        logMsg("\n[srrhi] Done. All files processed successfully.\n");
+        LogMsg("\n[srrhi] Done. All files processed successfully.\n");
     else
-        logMsg("\n[srrhi] Done with errors (exit code %d).\n", exitCode);
+        LogMsg("\n[srrhi] Done with errors (exit code %d).\n", exitCode);
 
     return exitCode;
 }

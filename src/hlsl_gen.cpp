@@ -1,44 +1,44 @@
-﻿#include "types.h"
+#include "types.h"
 #include <sstream>
 #include <stdexcept>
 
 // ---------------------------------------------------------------------------
 // HLSL type name reconstruction from TypeRef
 // ---------------------------------------------------------------------------
-static std::string hlslTypeName(const TypeRef& t)
+static std::string HlslTypeName(const TypeRef& t)
 {
     if (auto* bt = std::get_if<BuiltinType>(&t))
-        return bt->name;
+        return bt->m_Name;
 
     if (auto* ap = std::get_if<std::shared_ptr<ArrayNode>>(&t))
     {
         const ArrayNode& arr = **ap;
-        if (arr.created_from_matrix)
+        if (arr.m_bCreatedFromMatrix)
         {
             // Reconstruct "scalarNxM" (or "row_major scalarNxM")
-            // Column-major (default): element.vectorsize = rows, arraySize = cols
-            // Row-major:              element.vectorsize = cols, arraySize = rows
-            const BuiltinType* elem = std::get_if<BuiltinType>(&arr.elementType);
+            // Column-major (default): element.m_VectorSize = rows, arraySize = cols
+            // Row-major:              element.m_VectorSize = cols, arraySize = rows
+            const BuiltinType* elem = std::get_if<BuiltinType>(&arr.m_ElementType);
             if (!elem)
                 throw std::runtime_error("matrix element is not a BuiltinType");
 
-            int vs = elem->vectorsize;  // rows for col-major, cols for row-major
-            int as = arr.arraySize;     // cols for col-major, rows for row-major
+            int vs = elem->m_VectorSize;  // rows for col-major, cols for row-major
+            int as = arr.m_ArraySize;     // cols for col-major, rows for row-major
 
             std::string base;
-            if (!arr.is_row_major)
-                base = elem->scalarName + std::to_string(vs) + "x" + std::to_string(as);
+            if (!arr.m_bIsRowMajor)
+                base = elem->m_ScalarName + std::to_string(vs) + "x" + std::to_string(as);
             else
-                base = "row_major " + elem->scalarName +
+                base = "row_major " + elem->m_ScalarName +
                        std::to_string(as) + "x" + std::to_string(vs);
             return base;
         }
         // Regular array: recurse for element type name + [size]
-        return hlslTypeName(arr.elementType) + "[" + std::to_string(arr.arraySize) + "]";
+        return HlslTypeName(arr.m_ElementType) + "[" + std::to_string(arr.m_ArraySize) + "]";
     }
 
     if (auto* sp = std::get_if<StructType*>(&t))
-        return (*sp)->name;
+        return (*sp)->m_Name;
 
     return "???";
 }
@@ -46,7 +46,7 @@ static std::string hlslTypeName(const TypeRef& t)
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-static void emitPadding(std::ostringstream& out, int padBytes, int& padCount,
+static void EmitPadding(std::ostringstream& out, int padBytes, int& padCount,
                         const std::string& ind)
 {
     if (padBytes <= 0) return;
@@ -68,11 +68,11 @@ static void emitPadding(std::ostringstream& out, int padBytes, int& padCount,
 // ---------------------------------------------------------------------------
 
 // Forward declaration
-static void emitStructHlsl(std::ostringstream& out, const StructType& st,
+static void EmitStructHlsl(std::ostringstream& out, const StructType& st,
                             int& padCount, int indent,
                             const LayoutMember* lm = nullptr);
 
-static void emitStructBodyHlsl(std::ostringstream& out,
+static void EmitStructBodyHlsl(std::ostringstream& out,
                                 const std::vector<MemberVariable>& members,
                                 const std::vector<LayoutMember>& layoutSubmembers,
                                 int& padCount, int indent)
@@ -87,60 +87,60 @@ static void emitStructBodyHlsl(std::ostringstream& out,
         const MemberVariable& mv = members[i];
         const LayoutMember*   lm = (i < layoutSubmembers.size()) ? &layoutSubmembers[i] : nullptr;
 
-        int fieldOffset = lm ? lm->offset : cursor;
-        int fieldSize   = lm ? lm->size : 0;
-        int fieldPad    = lm ? lm->padding : 0;
+        int fieldOffset = lm ? lm->m_Offset : cursor;
+        int fieldSize   = lm ? lm->m_Size : 0;
+        int fieldPad    = lm ? lm->m_Padding : 0;
 
         // Padding before this field
         if (fieldOffset > cursor)
-            emitPadding(out, fieldOffset - cursor, padCount, fInd);
+            EmitPadding(out, fieldOffset - cursor, padCount, fInd);
 
         // Emit the field declaration
-        if (auto* structP = std::get_if<StructType*>(&mv.type))
+        if (auto* structP = std::get_if<StructType*>(&mv.m_Type))
         {
             // Struct field
-            out << fInd << (*structP)->name << " " << mv.name << ";\n";
+            out << fInd << (*structP)->m_Name << " " << mv.m_Name << ";\n";
         }
-        else if (auto* ap = std::get_if<std::shared_ptr<ArrayNode>>(&mv.type))
+        else if (auto* ap = std::get_if<std::shared_ptr<ArrayNode>>(&mv.m_Type))
         {
             const ArrayNode& arr = **ap;
-            if (arr.created_from_matrix)
+            if (arr.m_bCreatedFromMatrix)
             {
                 // Matrix: type name already includes NxM, no array suffix
-                out << fInd << hlslTypeName(mv.type) << " " << mv.name << ";\n";
+                out << fInd << HlslTypeName(mv.m_Type) << " " << mv.m_Name << ";\n";
             }
             else
             {
                 // Regular array: emit "elementType name[size];"
-                out << fInd << hlslTypeName(arr.elementType)
-                    << " " << mv.name
-                    << "[" << arr.arraySize << "];\n";
+                out << fInd << HlslTypeName(arr.m_ElementType)
+                    << " " << mv.m_Name
+                    << "[" << arr.m_ArraySize << "];\n";
             }
         }
         else
         {
-            out << fInd << hlslTypeName(mv.type) << " " << mv.name << ";\n";
+            out << fInd << HlslTypeName(mv.m_Type) << " " << mv.m_Name << ";\n";
         }
 
         // Trailing padding after this field
         if (fieldPad > 0)
-            emitPadding(out, fieldPad, padCount, fInd);
+            EmitPadding(out, fieldPad, padCount, fInd);
 
         // Advance cursor: end of field data + trailing pad
         cursor = fieldOffset + fieldSize + fieldPad;
     }
 }
 
-static void emitStructHlsl(std::ostringstream& out, const StructType& st,
+static void EmitStructHlsl(std::ostringstream& out, const StructType& st,
                             int& padCount, int indent,
                             const LayoutMember* lm)
 {
     std::string ind(indent * 4, ' ');
-    out << ind << "struct " << st.name << "\n" << ind << "{\n";
+    out << ind << "struct " << st.m_Name << "\n" << ind << "{\n";
 
-    const std::vector<LayoutMember>* subs = lm ? &lm->submembers : nullptr;
+    const std::vector<LayoutMember>* subs = lm ? &lm->m_Submembers : nullptr;
     std::vector<LayoutMember> empty;
-    emitStructBodyHlsl(out, st.members,
+    EmitStructBodyHlsl(out, st.m_Members,
                        subs ? *subs : empty,
                        padCount, indent + 1);
 
@@ -150,14 +150,14 @@ static void emitStructHlsl(std::ostringstream& out, const StructType& st,
 // ---------------------------------------------------------------------------
 // Emit cbuffer (HLSL)
 // ---------------------------------------------------------------------------
-static void emitCBufferHlsl(std::ostringstream& out,
+static void EmitCBufferHlsl(std::ostringstream& out,
                              const StructType& bufferStruct,
                              const LayoutMember& layout,
                              int& padCount)
 {
-    out << "cbuffer " << bufferStruct.name << "\n{\n";
+    out << "cbuffer " << bufferStruct.m_Name << "\n{\n";
 
-    emitStructBodyHlsl(out, bufferStruct.members, layout.submembers,
+    EmitStructBodyHlsl(out, bufferStruct.m_Members, layout.m_Submembers,
                        padCount, 1);
 
     out << "};\n\n";
@@ -166,37 +166,37 @@ static void emitCBufferHlsl(std::ostringstream& out,
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
-std::string generateHlsl(const ParseResult& pr,
+std::string GenerateHlsl(const ParseResult& pr,
                           const std::vector<LayoutMember>& layouts,
                           int& padCount)
 {
-    logMsg("[hlsl_gen] Generating HLSL header...\n");
+    LogMsg("[hlsl_gen] Generating HLSL header...\n");
 
     std::ostringstream out;
     out << "// Auto-generated by srrhi. Do not edit.\n\n";
 
     // Emit named struct definitions
-    logMsg("[hlsl_gen]   Emitting %zu struct(s)...\n", pr.structs.size());
-    for (const auto& st : pr.structs)
-        emitStructHlsl(out, st, padCount, 0, nullptr);
+    LogMsg("[hlsl_gen]   Emitting %zu struct(s)...\n", pr.m_Structs.size());
+    for (const auto& st : pr.m_Structs)
+        EmitStructHlsl(out, st, padCount, 0, nullptr);
 
     // Emit cbuffers (using layout info for padding)
-    logMsg("[hlsl_gen]   Emitting %zu cbuffer(s)...\n", layouts.size());
+    LogMsg("[hlsl_gen]   Emitting %zu cbuffer(s)...\n", layouts.size());
 
     size_t layoutIdx = 0;
-    for (const auto& bufMv : pr.buffers)
+    for (const auto& bufMv : pr.m_Buffers)
     {
-        if (!bufMv.isCBuffer) continue;
-        auto* sp = std::get_if<StructType*>(&bufMv.type);
+        if (!bufMv.m_bIsCBuffer) continue;
+        auto* sp = std::get_if<StructType*>(&bufMv.m_Type);
         if (!sp || !*sp) continue;
 
         if (layoutIdx < layouts.size())
         {
-            emitCBufferHlsl(out, **sp, layouts[layoutIdx], padCount);
+            EmitCBufferHlsl(out, **sp, layouts[layoutIdx], padCount);
             ++layoutIdx;
         }
     }
 
-    logMsg("[hlsl_gen] Done (padCount=%d)\n", padCount);
+    LogMsg("[hlsl_gen] Done (padCount=%d)\n", padCount);
     return out.str();
 }

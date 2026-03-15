@@ -18,12 +18,12 @@ struct StructType;
 // ---------------------------------------------------------------------------
 struct BuiltinType
 {
-    std::string name;                       // display name, e.g. "float", "float3"
-    std::string scalarName;                 // base scalar, e.g. "float", "float16_t"
-    int         elementsize          = 4;   // bytes per scalar component
-    int         alignment            = 4;   // = elementsize (scalar alignment)
-    int         vectorsize           = 1;   // number of components
-    bool        created_from_matrix  = false;
+    std::string m_Name;                       // display name, e.g. "float", "float3"
+    std::string m_ScalarName;                 // base scalar, e.g. "float", "float16_t"
+    int         m_ElementSize          = 4;   // bytes per scalar component
+    int         m_Alignment            = 4;   // = elementsize (scalar alignment)
+    int         m_VectorSize           = 1;   // number of components
+    bool        m_bCreatedFromMatrix  = false;
 };
 
 // ---------------------------------------------------------------------------
@@ -39,28 +39,28 @@ using TypeRef = std::variant<BuiltinType, std::shared_ptr<ArrayNode>, StructType
 // ---------------------------------------------------------------------------
 struct ArrayNode
 {
-    TypeRef     elementType;
-    int         arraySize             = 0;
-    std::string name;                       // e.g. "float3[4]" or "float3x4"
-    bool        created_from_matrix   = false;
-    bool        is_row_major          = false;
+    TypeRef     m_ElementType;
+    int         m_ArraySize             = 0;
+    std::string m_Name;                       // e.g. "float3[4]" or "float3x4"
+    bool        m_bCreatedFromMatrix   = false;
+    bool        m_bIsRowMajor          = false;
 };
 
 // ---------------------------------------------------------------------------
 // Helpers on TypeRef
 // ---------------------------------------------------------------------------
-int         typeAlignment(const TypeRef& t);    // scalar alignment for cbuffer layout
-std::string typeDisplayName(const TypeRef& t);  // display name for visualizer / codegen
+int         TypeAlignment(const TypeRef& t);    // scalar alignment for cbuffer layout
+std::string TypeDisplayName(const TypeRef& t);  // display name for visualizer / codegen
 
 // ---------------------------------------------------------------------------
 // MemberVariable: a field within a struct or cbuffer
 // ---------------------------------------------------------------------------
 struct MemberVariable
 {
-    TypeRef     type;
-    std::string name;
-    bool        isCBuffer = false;
-    bool        isSBuffer = false;
+    TypeRef     m_Type;
+    std::string m_Name;
+    bool        m_bIsCBuffer = false;
+    bool        m_bIsSBuffer = false;
 };
 
 // ---------------------------------------------------------------------------
@@ -68,8 +68,8 @@ struct MemberVariable
 // ---------------------------------------------------------------------------
 struct StructType
 {
-    std::string                  name;
-    std::vector<MemberVariable>  members;
+    std::string                  m_Name;
+    std::vector<MemberVariable>  m_Members;
 };
 
 // ---------------------------------------------------------------------------
@@ -84,10 +84,10 @@ struct StructType
 // ---------------------------------------------------------------------------
 struct ParseResult
 {
-    std::deque<StructType>      structs;
-    std::deque<StructType>      bufferDefs;
-    std::vector<MemberVariable> buffers;
-    std::string                 sourceFile;
+    std::deque<StructType>      m_Structs;
+    std::deque<StructType>      m_BufferDefs;
+    std::vector<MemberVariable> m_Buffers;
+    std::string                 m_SourceFile;
 };
 
 // ---------------------------------------------------------------------------
@@ -97,24 +97,24 @@ struct ParseResult
 // ---------------------------------------------------------------------------
 struct LayoutMember
 {
-    TypeRef                   type;
-    std::string               name;
-    int                       offset   = 0;
-    int                       size     = 0;
-    int                       padding  = 0;
-    bool                      isGlobal  = false;
-    bool                      isCBuffer = false;
-    bool                      isSBuffer = false;
-    std::vector<LayoutMember> submembers;
+    TypeRef                   m_Type;
+    std::string               m_Name;
+    int                       m_Offset   = 0;
+    int                       m_Size     = 0;
+    int                       m_Padding  = 0;
+    bool                      m_bIsGlobal  = false;
+    bool                      m_bIsCBuffer = false;
+    bool                      m_bIsSBuffer = false;
+    std::vector<LayoutMember> m_Submembers;
 
     // Sets self.padding and propagates into last array submember.
-    void setPadding(int p);
+    void SetPadding(int p);
 
     // Computes trailing padding for the previous submember, then appends m.
-    void pushSubmember(LayoutMember m);
+    void PushSubmember(LayoutMember m);
 };
 
 // ---------------------------------------------------------------------------
 // Logging
 // ---------------------------------------------------------------------------
-void logMsg(const char* fmt, ...);
+void LogMsg(const char* fmt, ...);

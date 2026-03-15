@@ -5,12 +5,12 @@
 // ---------------------------------------------------------------------------
 // C++ type mapping from BuiltinType
 // ---------------------------------------------------------------------------
-struct CppTypeInfo { std::string typeName; int arrayMult = 0; };
+struct CppTypeInfo { std::string m_TypeName; int m_ArrayMult = 0; };
 
-static CppTypeInfo mapBuiltinToCpp(const BuiltinType& bt)
+static CppTypeInfo MapBuiltinToCpp(const BuiltinType& bt)
 {
-    const std::string& sc = bt.scalarName;
-    int vs = bt.vectorsize;
+    const std::string& sc = bt.m_ScalarName;
+    int vs = bt.m_VectorSize;
 
     // Scalar
     if (vs == 1)
@@ -28,7 +28,7 @@ static CppTypeInfo mapBuiltinToCpp(const BuiltinType& bt)
         return {"float"};
     }
 
-    // float vectors — use DirectXMath when available
+    // float vectors ? use DirectXMath when available
     if (sc == "float" || sc == "float32_t")
     {
         if (vs == 2) return {"DirectX::XMFLOAT2"};
@@ -49,13 +49,13 @@ static CppTypeInfo mapBuiltinToCpp(const BuiltinType& bt)
     }
 
     // Fallback: scalar array
-    CppTypeInfo base = mapBuiltinToCpp(BuiltinType{bt.scalarName, bt.scalarName,
-                                                    bt.elementsize, bt.alignment, 1});
-    base.arrayMult = vs;
+    CppTypeInfo base = MapBuiltinToCpp(BuiltinType{bt.m_ScalarName, bt.m_ScalarName,
+                                                    bt.m_ElementSize, bt.m_Alignment, 1});
+    base.m_ArrayMult = vs;
     return base;
 }
 
-static void emitPadding(std::ostringstream& out, int padBytes, int& padCount,
+static void EmitPadding(std::ostringstream& out, int padBytes, int& padCount,
                         const std::string& ind)
 {
     if (padBytes <= 0) return;
@@ -74,10 +74,10 @@ static void emitPadding(std::ostringstream& out, int padBytes, int& padCount,
 // Emit struct / cbuffer members (C++)
 //   - Walks members paired with their layout submembers.
 //   - Array fields are EXPANDED to per-element members with stride padding.
-//   - Matrix fields (created_from_matrix arrays) are emitted column-by-column.
+//   - Matrix fields (m_bCreatedFromMatrix arrays) are emitted column-by-column.
 // ---------------------------------------------------------------------------
 
-static void emitMembersCpp(std::ostringstream& out,
+static void EmitMembersCpp(std::ostringstream& out,
                             const std::vector<MemberVariable>& members,
                             const std::vector<LayoutMember>& lms,
                             int& padCount, const std::string& ind)
@@ -90,37 +90,37 @@ static void emitMembersCpp(std::ostringstream& out,
         const LayoutMember* lm   = (i < lms.size()) ? &lms[i] : nullptr;
 
         // Determine field offset for pre-field padding
-        int fieldOffset = lm ? lm->offset : cursor;
+        int fieldOffset = lm ? lm->m_Offset : cursor;
         if (fieldOffset > cursor)
-            emitPadding(out, fieldOffset - cursor, padCount, ind);
+            EmitPadding(out, fieldOffset - cursor, padCount, ind);
 
         // === Struct field ===
-        if (auto* sp = std::get_if<StructType*>(&mv.type))
+        if (auto* sp = std::get_if<StructType*>(&mv.m_Type))
         {
             if (!lm) { cursor = fieldOffset; continue; }
 
             // Check if this is an array of structs (layout node is an array)
-            bool isArray = std::holds_alternative<std::shared_ptr<ArrayNode>>(lm->type);
-            if (isArray)
+            bool bIsArray = std::holds_alternative<std::shared_ptr<ArrayNode>>(lm->m_Type);
+            if (bIsArray)
             {
                 // Expand each array element as a separate struct member
-                for (size_t e = 0; e < lm->submembers.size(); ++e)
+                for (size_t e = 0; e < lm->m_Submembers.size(); ++e)
                 {
-                    const LayoutMember& elem = lm->submembers[e];
-                    std::string eName = mv.name + "_" + std::to_string(e);
-                    out << ind << (*sp)->name << " " << eName << ";\n";
-                    if (elem.padding > 0)
-                        emitPadding(out, elem.padding, padCount, ind);
-                    cursor = elem.offset + elem.size + elem.padding;
+                    const LayoutMember& elem = lm->m_Submembers[e];
+                    std::string eName = mv.m_Name + "_" + std::to_string(e);
+                    out << ind << (*sp)->m_Name << " " << eName << ";\n";
+                    if (elem.m_Padding > 0)
+                        EmitPadding(out, elem.m_Padding, padCount, ind);
+                    cursor = elem.m_Offset + elem.m_Size + elem.m_Padding;
                 }
             }
             else
             {
                 // Single struct member
-                out << ind << (*sp)->name << " " << mv.name << ";\n";
-                if (lm->padding > 0)
-                    emitPadding(out, lm->padding, padCount, ind);
-                cursor = lm->offset + lm->size + lm->padding;
+                out << ind << (*sp)->m_Name << " " << mv.m_Name << ";\n";
+                if (lm->m_Padding > 0)
+                    EmitPadding(out, lm->m_Padding, padCount, ind);
+                cursor = lm->m_Offset + lm->m_Size + lm->m_Padding;
             }
             continue;
         }
@@ -128,86 +128,86 @@ static void emitMembersCpp(std::ostringstream& out,
         // === BuiltinType or ArrayNode field ===
         if (!lm) { cursor = fieldOffset; continue; }
 
-        bool isArray = std::holds_alternative<std::shared_ptr<ArrayNode>>(lm->type);
+        bool bIsArray = std::holds_alternative<std::shared_ptr<ArrayNode>>(lm->m_Type);
 
-        if (isArray)
+        if (bIsArray)
         {
-            const ArrayNode& arr = *std::get<std::shared_ptr<ArrayNode>>(lm->type);
+            const ArrayNode& arr = *std::get<std::shared_ptr<ArrayNode>>(lm->m_Type);
 
-            if (arr.created_from_matrix)
+            if (arr.m_bCreatedFromMatrix)
             {
                 // Matrix: emit column-by-column
-                const BuiltinType* elemBt = std::get_if<BuiltinType>(&arr.elementType);
+                const BuiltinType* elemBt = std::get_if<BuiltinType>(&arr.m_ElementType);
                 if (elemBt)
                 {
-                    auto cti = mapBuiltinToCpp(*elemBt);
-                    int colDataElems = elemBt->vectorsize;
-                    int elemsPerSlot = 16 / elemBt->elementsize;
+                    auto cti = MapBuiltinToCpp(*elemBt);
+                    int colDataElems = elemBt->m_VectorSize;
+                    int elemsPerSlot = 16 / elemBt->m_ElementSize;
 
-                    for (size_t c = 0; c < lm->submembers.size(); ++c)
+                    for (size_t c = 0; c < lm->m_Submembers.size(); ++c)
                     {
-                        const LayoutMember& col = lm->submembers[c];
-                        bool lastCol = (c == lm->submembers.size() - 1);
-                        std::string colName = mv.name + "_c" + std::to_string(c);
+                        const LayoutMember& col = lm->m_Submembers[c];
+                        bool bLastCol = (c == lm->m_Submembers.size() - 1);
+                        std::string colName = mv.m_Name + "_c" + std::to_string(c);
 
-                        if (lastCol)
-                            out << ind << cti.typeName << " " << colName << "[" << colDataElems << "];\n";
+                        if (bLastCol)
+                            out << ind << cti.m_TypeName << " " << colName << "[" << colDataElems << "];\n";
                         else
-                            out << ind << cti.typeName << " " << colName << "[" << elemsPerSlot << "];\n";
+                            out << ind << cti.m_TypeName << " " << colName << "[" << elemsPerSlot << "];\n";
 
-                        if (!lastCol && col.padding > 0)
-                            emitPadding(out, col.padding, padCount, ind);
-                        cursor = col.offset + col.size + (lastCol ? lm->padding : col.padding);
+                        if (!bLastCol && col.m_Padding > 0)
+                            EmitPadding(out, col.m_Padding, padCount, ind);
+                        cursor = col.m_Offset + col.m_Size + (bLastCol ? lm->m_Padding : col.m_Padding);
                     }
-                    if (lm->padding > 0)
-                        emitPadding(out, lm->padding, padCount, ind);
-                    cursor = lm->offset + lm->size + lm->padding;
+                    if (lm->m_Padding > 0)
+                        EmitPadding(out, lm->m_Padding, padCount, ind);
+                    cursor = lm->m_Offset + lm->m_Size + lm->m_Padding;
                 }
             }
             else
             {
                 // Regular array: expand per element
-                for (size_t e = 0; e < lm->submembers.size(); ++e)
+                for (size_t e = 0; e < lm->m_Submembers.size(); ++e)
                 {
-                    const LayoutMember& elem = lm->submembers[e];
-                    bool lastElem = (e == lm->submembers.size() - 1);
+                    const LayoutMember& elem = lm->m_Submembers[e];
+                    bool bLastElem = (e == lm->m_Submembers.size() - 1);
 
-                    if (auto* elemBt = std::get_if<BuiltinType>(&elem.type))
+                    if (auto* elemBt = std::get_if<BuiltinType>(&elem.m_Type))
                     {
-                        auto cti = mapBuiltinToCpp(*elemBt);
-                        std::string eName = mv.name + "_" + std::to_string(e);
-                        out << ind << cti.typeName << " " << eName;
-                        if (cti.arrayMult > 0)
-                            out << "[" << cti.arrayMult << "]";
+                        auto cti = MapBuiltinToCpp(*elemBt);
+                        std::string eName = mv.m_Name + "_" + std::to_string(e);
+                        out << ind << cti.m_TypeName << " " << eName;
+                        if (cti.m_ArrayMult > 0)
+                            out << "[" << cti.m_ArrayMult << "]";
                         out << ";\n";
                     }
-                    else if (auto* elemSp = std::get_if<StructType*>(&elem.type))
+                    else if (auto* elemSp = std::get_if<StructType*>(&elem.m_Type))
                     {
-                        std::string eName = mv.name + "_" + std::to_string(e);
-                        out << ind << (*elemSp)->name << " " << eName << ";\n";
+                        std::string eName = mv.m_Name + "_" + std::to_string(e);
+                        out << ind << (*elemSp)->m_Name << " " << eName << ";\n";
                     }
 
-                    if (!lastElem && elem.padding > 0)
-                        emitPadding(out, elem.padding, padCount, ind);
-                    cursor = elem.offset + elem.size + (lastElem ? 0 : elem.padding);
+                    if (!bLastElem && elem.m_Padding > 0)
+                        EmitPadding(out, elem.m_Padding, padCount, ind);
+                    cursor = elem.m_Offset + elem.m_Size + (bLastElem ? 0 : elem.m_Padding);
                 }
-                cursor = lm->offset + lm->size + lm->padding;
+                cursor = lm->m_Offset + lm->m_Size + lm->m_Padding;
             }
         }
         else
         {
             // Single non-array BuiltinType field
-            const BuiltinType* bt = std::get_if<BuiltinType>(&lm->type);
+            const BuiltinType* bt = std::get_if<BuiltinType>(&lm->m_Type);
             if (bt)
             {
-                auto cti = mapBuiltinToCpp(*bt);
-                out << ind << cti.typeName << " " << mv.name;
-                if (cti.arrayMult > 0) out << "[" << cti.arrayMult << "]";
+                auto cti = MapBuiltinToCpp(*bt);
+                out << ind << cti.m_TypeName << " " << mv.m_Name;
+                if (cti.m_ArrayMult > 0) out << "[" << cti.m_ArrayMult << "]";
                 out << ";\n";
             }
-            if (lm->padding > 0)
-                emitPadding(out, lm->padding, padCount, ind);
-            cursor = lm->offset + lm->size + lm->padding;
+            if (lm->m_Padding > 0)
+                EmitPadding(out, lm->m_Padding, padCount, ind);
+            cursor = lm->m_Offset + lm->m_Size + lm->m_Padding;
         }
     }
 }
@@ -215,46 +215,46 @@ static void emitMembersCpp(std::ostringstream& out,
 // ---------------------------------------------------------------------------
 // Emit a named struct definition (for use in the C++ header)
 // ---------------------------------------------------------------------------
-static void emitStructCpp(std::ostringstream& out, const StructType& st,
+static void EmitStructCpp(std::ostringstream& out, const StructType& st,
                            int& padCount)
 {
-    out << "struct " << st.name << "\n{\n";
+    out << "struct " << st.m_Name << "\n{\n";
     // Structs without layout info: emit fields in order without padding
     // (padding is added in the cbuffer context)
     std::string fInd("    ");
-    for (const auto& mv : st.members)
+    for (const auto& mv : st.m_Members)
     {
-        if (auto* sp = std::get_if<StructType*>(&mv.type))
-            out << fInd << (*sp)->name << " " << mv.name << ";\n";
-        else if (auto* bt = std::get_if<BuiltinType>(&mv.type))
+        if (auto* sp = std::get_if<StructType*>(&mv.m_Type))
+            out << fInd << (*sp)->m_Name << " " << mv.m_Name << ";\n";
+        else if (auto* bt = std::get_if<BuiltinType>(&mv.m_Type))
         {
-            auto cti = mapBuiltinToCpp(*bt);
-            out << fInd << cti.typeName << " " << mv.name;
-            if (cti.arrayMult > 0) out << "[" << cti.arrayMult << "]";
+            auto cti = MapBuiltinToCpp(*bt);
+            out << fInd << cti.m_TypeName << " " << mv.m_Name;
+            if (cti.m_ArrayMult > 0) out << "[" << cti.m_ArrayMult << "]";
             out << ";\n";
         }
-        else if (auto* ap = std::get_if<std::shared_ptr<ArrayNode>>(&mv.type))
+        else if (auto* ap = std::get_if<std::shared_ptr<ArrayNode>>(&mv.m_Type))
         {
             const ArrayNode& arr = **ap;
-            if (arr.created_from_matrix)
+            if (arr.m_bCreatedFromMatrix)
             {
-                // Matrix: emit as array of column vectors, e.g. float4x4 → XMFLOAT4[4]
-                if (auto* elemBt = std::get_if<BuiltinType>(&arr.elementType))
+                // Matrix: emit as array of column vectors, e.g. float4x4 ? XMFLOAT4[4]
+                if (auto* elemBt = std::get_if<BuiltinType>(&arr.m_ElementType))
                 {
-                    auto cti = mapBuiltinToCpp(*elemBt);
-                    out << fInd << cti.typeName << " " << mv.name << "[" << arr.arraySize << "];\n";
+                    auto cti = MapBuiltinToCpp(*elemBt);
+                    out << fInd << cti.m_TypeName << " " << mv.m_Name << "[" << arr.m_ArraySize << "];\n";
                 }
             }
             else
             {
-                if (auto* elemBt = std::get_if<BuiltinType>(&arr.elementType))
+                if (auto* elemBt = std::get_if<BuiltinType>(&arr.m_ElementType))
                 {
-                    auto cti = mapBuiltinToCpp(*elemBt);
-                    out << fInd << cti.typeName << " " << mv.name << "[" << arr.arraySize << "];\n";
+                    auto cti = MapBuiltinToCpp(*elemBt);
+                    out << fInd << cti.m_TypeName << " " << mv.m_Name << "[" << arr.m_ArraySize << "];\n";;
                 }
-                else if (auto* elemSp = std::get_if<StructType*>(&arr.elementType))
+                else if (auto* elemSp = std::get_if<StructType*>(&arr.m_ElementType))
                 {
-                    out << fInd << (*elemSp)->name << " " << mv.name << "[" << arr.arraySize << "];\n";
+                    out << fInd << (*elemSp)->m_Name << " " << mv.m_Name << "[" << arr.m_ArraySize << "];\n";
                 }
             }
         }
@@ -265,11 +265,11 @@ static void emitStructCpp(std::ostringstream& out, const StructType& st,
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
-std::string generateCpp(const ParseResult& pr,
+std::string GenerateCpp(const ParseResult& pr,
                          const std::vector<LayoutMember>& layouts,
                          int& padCount)
 {
-    logMsg("[cpp_gen] Generating C++ header...\n");
+    LogMsg("[cpp_gen] Generating C++ header...\n");
 
     std::ostringstream out;
     out << "// Auto-generated by srrhi. Do not edit.\n";
@@ -277,26 +277,26 @@ std::string generateCpp(const ParseResult& pr,
     out << "#include <cstdint>\n\n";
 
     // Named struct definitions
-    for (const auto& st : pr.structs)
-        emitStructCpp(out, st, padCount);
+    for (const auto& st : pr.m_Structs)
+        EmitStructCpp(out, st, padCount);
 
     // cbuffer as alignas(16) structs with full byte-exact layout
     size_t layoutIdx = 0;
-    for (const auto& bufMv : pr.buffers)
+    for (const auto& bufMv : pr.m_Buffers)
     {
-        if (!bufMv.isCBuffer) continue;
-        auto* sp = std::get_if<StructType*>(&bufMv.type);
+        if (!bufMv.m_bIsCBuffer) continue;
+        auto* sp = std::get_if<StructType*>(&bufMv.m_Type);
         if (!sp || !*sp) continue;
 
         if (layoutIdx >= layouts.size()) continue;
         const LayoutMember& lm = layouts[layoutIdx++];
         const StructType& st   = **sp;
 
-        out << "struct alignas(16) " << st.name << "\n{\n";
-        emitMembersCpp(out, st.members, lm.submembers, padCount, "    ");
+        out << "struct alignas(16) " << st.m_Name << "\n{\n";
+        EmitMembersCpp(out, st.m_Members, lm.m_Submembers, padCount, "    ");
         out << "};\n\n";
     }
 
-    logMsg("[cpp_gen] Done (padCount=%d)\n", padCount);
+    LogMsg("[cpp_gen] Done (padCount=%d)\n", padCount);
     return out.str();
 }

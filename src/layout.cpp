@@ -4,7 +4,7 @@
 // CBuffer layout algorithm
 //
 // Rules (same as HLSL cbuffer packing):
-//  - BuiltinType: align to type.alignment (scalar size), then check if the
+//  - BuiltinType: align to type.m_Alignment (scalar size), then check if the
 //    FULL size crosses a 16-byte register boundary and, if so, re-align to 16.
 //  - ArrayType:   align to 16, then each element starts at a new 16-byte boundary.
 //  - StructType:  align to 16 (AlignOffsetTo16 before layout).
@@ -13,103 +13,103 @@
 
 class CBufferLayout
 {
-    int curOffset = 0;
+    int m_CurOffset = 0;
 
-    void alignTo16()
+    void AlignTo16()
     {
-        curOffset = (curOffset + 15) & ~15;
+        m_CurOffset = (m_CurOffset + 15) & ~15;
     }
 
-    void alignTo(int align)
+    void AlignTo(int align)
     {
         if (align > 0)
-            curOffset = (curOffset + align - 1) & ~(align - 1);
+            m_CurOffset = (m_CurOffset + align - 1) & ~(align - 1);
     }
 
-    void layoutBuiltin(const BuiltinType& bt, const std::string& name,
+    void LayoutBuiltin(const BuiltinType& bt, const std::string& name,
                        LayoutMember& parent)
     {
-        alignTo(bt.alignment);
-        int size = bt.elementsize * bt.vectorsize;
+        AlignTo(bt.m_Alignment);
+        int size = bt.m_ElementSize * bt.m_VectorSize;
         // If this element would cross a 16-byte boundary, align to 16 first
-        if ((curOffset + size - 1) / 16 > curOffset / 16)
-            alignTo16();
+        if ((m_CurOffset + size - 1) / 16 > m_CurOffset / 16)
+            AlignTo16();
 
         LayoutMember m;
-        m.type   = bt;
-        m.name   = name;
-        m.offset = curOffset;
-        m.size   = size;
-        parent.pushSubmember(std::move(m));
-        curOffset += size;
+        m.m_Type   = bt;
+        m.m_Name   = name;
+        m.m_Offset = m_CurOffset;
+        m.m_Size   = size;
+        parent.PushSubmember(std::move(m));
+        m_CurOffset += size;
     }
 
-    void layoutArray(const ArrayNode& arr, const std::string& name,
+    void LayoutArray(const ArrayNode& arr, const std::string& name,
                      LayoutMember& parent)
     {
-        alignTo16();
-        int startOffset = curOffset;
+        AlignTo16();
+        int startOffset = m_CurOffset;
 
         LayoutMember array;
-        array.type   = std::make_shared<ArrayNode>(arr); // copy
-        array.name   = name;
-        array.offset = curOffset;
+        array.m_Type   = std::make_shared<ArrayNode>(arr); // copy
+        array.m_Name   = name;
+        array.m_Offset = m_CurOffset;
 
-        for (int i = 0; i < arr.arraySize; ++i)
+        for (int i = 0; i < arr.m_ArraySize; ++i)
         {
-            alignTo16();
-            layoutType(arr.elementType,
+            AlignTo16();
+            LayoutType(arr.m_ElementType,
                        name + "[" + std::to_string(i) + "]",
                        array);
         }
 
-        array.size = curOffset - startOffset;
-        parent.pushSubmember(std::move(array));
+        array.m_Size = m_CurOffset - startOffset;
+        parent.PushSubmember(std::move(array));
     }
 
-    LayoutMember layoutStruct(const StructType& st, const std::string& name)
+    LayoutMember LayoutStruct(const StructType& st, const std::string& name)
     {
-        alignTo16();
-        int startOffset = curOffset;
+        AlignTo16();
+        int startOffset = m_CurOffset;
 
         LayoutMember layout;
-        layout.type   = const_cast<StructType*>(&st);
-        layout.name   = name;
-        layout.offset = curOffset;
+        layout.m_Type   = const_cast<StructType*>(&st);
+        layout.m_Name   = name;
+        layout.m_Offset = m_CurOffset;
 
-        for (auto& member : st.members)
-            layoutType(member.type, member.name, layout);
+        for (auto& member : st.m_Members)
+            LayoutType(member.m_Type, member.m_Name, layout);
 
         // NOTE: size is NOT rounded to multiple of 16
-        layout.size = curOffset - startOffset;
+        layout.m_Size = m_CurOffset - startOffset;
         return layout;
     }
 
-    void layoutType(const TypeRef& type, const std::string& name,
+    void LayoutType(const TypeRef& type, const std::string& name,
                     LayoutMember& parent)
     {
         if (auto* bt = std::get_if<BuiltinType>(&type))
         {
-            layoutBuiltin(*bt, name, parent);
+            LayoutBuiltin(*bt, name, parent);
         }
         else if (auto* ap = std::get_if<std::shared_ptr<ArrayNode>>(&type))
         {
-            layoutArray(**ap, name, parent);
+            LayoutArray(**ap, name, parent);
         }
         else if (auto* sp = std::get_if<StructType*>(&type))
         {
-            LayoutMember lm = layoutStruct(**sp, name);
-            parent.pushSubmember(std::move(lm));
+            LayoutMember lm = LayoutStruct(**sp, name);
+            parent.PushSubmember(std::move(lm));
         }
     }
 
 public:
-    LayoutMember generate(const StructType& bufferStruct)
+    LayoutMember Generate(const StructType& bufferStruct)
     {
-        curOffset = 0;
-        LayoutMember layout = layoutStruct(bufferStruct, "");
-        layout.isCBuffer = true;
-        layout.isGlobal  = true;
+        m_CurOffset = 0;
+        LayoutMember layout = LayoutStruct(bufferStruct, "");
+        layout.m_bIsCBuffer = true;
+        layout.m_bIsGlobal  = true;
         return layout;
     }
 };
@@ -117,36 +117,36 @@ public:
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
-std::vector<LayoutMember> computeLayouts(ParseResult& pr)
+std::vector<LayoutMember> ComputeLayouts(ParseResult& pr)
 {
-    logMsg("[layout] Computing layouts for %zu buffer(s)...\n", pr.buffers.size());
+    LogMsg("[layout] Computing layouts for %zu buffer(s)...\n", pr.m_Buffers.size());
 
     std::vector<LayoutMember> result;
     CBufferLayout algo;
 
-    for (auto& bufMv : pr.buffers)
+    for (auto& bufMv : pr.m_Buffers)
     {
-        if (!bufMv.isCBuffer) continue; // skip sbuffers for now
+        if (!bufMv.m_bIsCBuffer) continue; // skip sbuffers for now
 
-        auto* st = std::get_if<StructType*>(&bufMv.type);
+        auto* st = std::get_if<StructType*>(&bufMv.m_Type);
         if (!st || !*st)
         {
-            logMsg("[layout]   WARNING: buffer has non-struct type, skipping\n");
+            LogMsg("[layout]   WARNING: buffer has non-struct type, skipping\n");
             continue;
         }
 
         StructType& bufStruct = **st;
-        logMsg("[layout]   Laying out: %s\n", bufStruct.name.c_str());
+        LogMsg("[layout]   Laying out: %s\n", bufStruct.m_Name.c_str());
 
-        LayoutMember lm = algo.generate(bufStruct);
-        lm.name      = bufStruct.name;  // cbuffer name from the buffer struct
-        lm.isCBuffer = true;
-        lm.isGlobal  = true;
+        LayoutMember lm = algo.Generate(bufStruct);
+        lm.m_Name      = bufStruct.m_Name;  // cbuffer name from the buffer struct
+        lm.m_bIsCBuffer = true;
+        lm.m_bIsGlobal  = true;
 
-        logMsg("[layout]     Total size: %d bytes\n", lm.size);
+        LogMsg("[layout]     Total size: %d bytes\n", lm.m_Size);
         result.push_back(std::move(lm));
     }
 
-    logMsg("[layout] Done\n");
+    LogMsg("[layout] Done\n");
     return result;
 }
