@@ -412,6 +412,13 @@ struct Parser
                 if (rows < 1 || rows > 4 || cols < 1 || cols > 4)
                     throw std::runtime_error(m_FilePath + ":" + std::to_string(nameLine) +
                                              ": matrix dimension out of range");
+                // Reject row_major/column_major on float4x4
+                if (key == "float" && rows == 4 && cols == 4 && bIsRowMajor)
+                {
+                    LogMsg("[parser] ERROR: row_major/column_major on float4x4 is not allowed at line %d\n", nameLine);
+                    throw std::runtime_error(m_FilePath + ":" + std::to_string(nameLine) +
+                                             ": row_major/column_major on float4x4 is not allowed");
+                }
                 int vectorSize = bIsRowMajor ? cols : rows;
                 int arraySize  = bIsRowMajor ? rows : cols;
                 TypeRef elem = MakeBuiltin(info, vectorSize, true);
@@ -557,15 +564,16 @@ struct Parser
                     continue;
                 }
                 
-                // Reject #pragma pack directives
+                // Reject #pragma pack and #pragma pack_matrix directives
                 if (m_Cur.m_Kind == TokKind::Ident && m_Cur.m_Text == "pragma")
                 {
                     Advance(); // consume 'pragma'
-                    if (m_Cur.m_Kind == TokKind::Ident && m_Cur.m_Text == "pack")
+                    if (m_Cur.m_Kind == TokKind::Ident && (m_Cur.m_Text == "pack" || m_Cur.m_Text == "pack_matrix"))
                     {
-                        LogMsg("[parser] ERROR: forbidden '#pragma pack' directive at line %d\n", hashLine);
+                        std::string pragmaType = m_Cur.m_Text;
+                        LogMsg("[parser] ERROR: forbidden '#pragma %s' directive at line %d\n", pragmaType.c_str(), hashLine);
                         throw std::runtime_error(m_FilePath + ":" + std::to_string(hashLine) +
-                                                 ": '#pragma pack' is not allowed in this file format");
+                                                 ": '#pragma " + pragmaType + "' is not allowed in this file format");
                     }
                     // Skip unknown pragmas
                     while (!Check(TokKind::Eof) && m_Cur.m_Kind != TokKind::Hash)
