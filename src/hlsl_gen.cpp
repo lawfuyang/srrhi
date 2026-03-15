@@ -153,6 +153,7 @@ static void EmitStructHlsl(std::ostringstream& out, const StructType& st,
 // ---------------------------------------------------------------------------
 // Emit cbuffer (HLSL)
 // registerNum = -1 means no register binding
+// Now the cbuffer contains a struct member instead of inlining all members
 // ---------------------------------------------------------------------------
 static void EmitCBufferHlsl(std::ostringstream& out,
                              const StructType& bufferStruct,
@@ -165,16 +166,15 @@ static void EmitCBufferHlsl(std::ostringstream& out,
     else
         out << "cbuffer " << bufferStruct.m_Name << " : register(b" << registerNum << ")\n{\n";
 
-    EmitStructBodyHlsl(out, bufferStruct.m_Members, layout.m_Submembers,
-                       padCount, 1);
+    // Emit the struct as a member instead of inlining members
+    out << "    " << bufferStruct.m_Name << " m_" << bufferStruct.m_Name << ";\n";
 
     out << "};\n\n";
 }
 
 // ---------------------------------------------------------------------------
 // Emit wrapped cbuffer for srinput member (HLSL)
-// Instead of wrapping in a struct member, directly emit the cbuffer with
-// fields plus padding, keeping the register binding.
+// The cbuffer contains the struct as a member instead of inlining fields
 // ---------------------------------------------------------------------------
 static void EmitWrappedCBufferHlsl(std::ostringstream& out,
                                    const StructType& cbufferDef,
@@ -184,8 +184,8 @@ static void EmitWrappedCBufferHlsl(std::ostringstream& out,
 {
     out << "cbuffer " << cbufferDef.m_Name << " : register(b" << registerNum << ")\n{\n";
 
-    EmitStructBodyHlsl(out, cbufferDef.m_Members, layout.m_Submembers,
-                       padCount, 1);
+    // Emit the struct as a member instead of inlining members
+    out << "    " << cbufferDef.m_Name << " m_" << cbufferDef.m_Name << ";\n";
 
     out << "};\n\n";
 }

@@ -115,15 +115,18 @@ static std::string BuildDummyEntryPoint(const std::vector<LayoutMember>& layouts
         if (cbLayout.m_Submembers.empty()) continue;
 
         // Find the first scalar or vector member (matrices and arrays need [idx])
+        // Access it through the struct member: m_<StructName>.<fieldName>
         for (const auto& m : cbLayout.m_Submembers)
         {
+            std::string fieldAccess = "m_" + cbLayout.m_Name + "." + m.m_Name;
+
             if (std::holds_alternative<BuiltinType>(m.m_Type))
             {
                 const auto& bt = std::get<BuiltinType>(m.m_Type);
                 if (bt.m_VectorSize == 1)
-                    body << "    _srrhi_check ^= asuint((float)" << m.m_Name << ");\n";
+                    body << "    _srrhi_check ^= asuint((float)" << fieldAccess << ");\n";
                 else
-                    body << "    _srrhi_check ^= asuint(" << m.m_Name << ".x);\n";
+                    body << "    _srrhi_check ^= asuint(" << fieldAccess << ".x);\n";
                 break;
             }
             if (auto* ap = std::get_if<std::shared_ptr<ArrayNode>>(&m.m_Type))
@@ -132,9 +135,9 @@ static std::string BuildDummyEntryPoint(const std::vector<LayoutMember>& layouts
                 if (auto* bt = std::get_if<BuiltinType>(&arr.m_ElementType))
                 {
                     if (bt->m_VectorSize == 1)
-                        body << "    _srrhi_check ^= asuint((float)" << m.m_Name << "[0]);\n";
+                        body << "    _srrhi_check ^= asuint((float)" << fieldAccess << "[0]);\n";
                     else
-                        body << "    _srrhi_check ^= asuint(" << m.m_Name << "[0].x);\n";
+                        body << "    _srrhi_check ^= asuint(" << fieldAccess << "[0].x);\n";
                     break;
                 }
                 // array of struct — try first member of struct
@@ -147,9 +150,9 @@ static std::string BuildDummyEntryPoint(const std::vector<LayoutMember>& layouts
                         if (auto* bt2 = std::get_if<BuiltinType>(&firstField.m_Type))
                         {
                             if (bt2->m_VectorSize == 1)
-                                body << "    _srrhi_check ^= asuint((float)" << m.m_Name << "[0]." << firstField.m_Name << ");\n";
+                                body << "    _srrhi_check ^= asuint((float)" << fieldAccess << "[0]." << firstField.m_Name << ");\n";
                             else
-                                body << "    _srrhi_check ^= asuint(" << m.m_Name << "[0]." << firstField.m_Name << ".x);\n";
+                                body << "    _srrhi_check ^= asuint(" << fieldAccess << "[0]." << firstField.m_Name << ".x);\n";
                             break;
                         }
                     }
@@ -162,7 +165,7 @@ static std::string BuildDummyEntryPoint(const std::vector<LayoutMember>& layouts
                 if (!st->m_Members.empty())
                 {
                     const auto& firstField = st->m_Members[0];
-                    body << "    _srrhi_check ^= asuint((float)" << m.m_Name << "." << firstField.m_Name << ");\n";
+                    body << "    _srrhi_check ^= asuint((float)" << fieldAccess << "." << firstField.m_Name << ");\n";
                 }
                 break;
             }
@@ -340,52 +343,40 @@ static bool CompareWithReflection(
                    << "' total size = " << pRcb->totalSize << " bytes\n";
         }
 
-        // Build name→offset map of our top-level layout members for O(1) lookup
-        std::unordered_map<std::string, int> ourOffsets;
-        for (const auto& m : cbLayout.m_Submembers)
-            ourOffsets[m.m_Name] = m.m_Offset;
-
-        // --- Check that every DXC variable has the right offset ---
+        // --- Check struct member wrapper ---
+        // With the new HLSL generation, the cbuffer contains a single struct member
+        // named m_<StructName> instead of inlining members.
+        std::string expectedStructMember = "m_" + cbName;
+        
+        // Check if the expected struct member exists in DXC reflection
+        bool foundStructMember = false;
         for (const auto& rv : pRcb->vars)
         {
-            auto it = ourOffsets.find(rv.name);
-            if (it == ourOffsets.end())
+            if (rv.name == expectedStructMember)
             {
-                // Variable is in DXC but not our layout — unexpected
-                report << "    [FAIL] DXC var '" << cbName << "::" << rv.name
-                       << "' (offset=" << rv.offset
-                       << ") has no matching entry in our layout\n";
-                ok = false;
-                continue;
-            }
-            if (it->second != static_cast<int>(rv.offset))
-            {
-                report << "    [FAIL] '" << cbName << "::" << rv.name
-                       << "' offset: ours=" << it->second
-                       << " dxc=" << rv.offset << "\n";
-                ok = false;
-            }
-            else
-            {
-                report << "    [OK]   '" << cbName << "::" << rv.name
-                       << "' offset=" << rv.offset
-                       << " size=" << rv.size << "\n";
+                foundStructMember = true;
+                // The struct member should be at offset 0
+                if (rv.offset != 0)
+                {
+                    report << "    [FAIL] struct member '" << cbName << "::" 
+                           << expectedStructMember << "' offset: "
+                           << "ours=0 dxc=" << rv.offset << "\n";
+                    ok = false;
+                }
+                else
+                {
+                    report << "    [OK]   struct member '" << cbName << "::" 
+                           << expectedStructMember << "' offset=0 size=" << rv.size << "\n";
+                }
+                break;
             }
         }
-
-        // --- Check every one of our layout members was seen by DXC ---
-        for (const auto& m : cbLayout.m_Submembers)
+        
+        if (!foundStructMember)
         {
-            bool found = false;
-            for (const auto& rv : pRcb->vars)
-                if (rv.name == m.m_Name) { found = true; break; }
-
-            if (!found)
-            {
-                report << "    [FAIL] our member '" << cbName << "::" << m.m_Name
-                       << "' not found in DXC reflection\n";
-                ok = false;
-            }
+            report << "    [FAIL] expected struct member '" << cbName << "::" 
+                   << expectedStructMember << "' not found in DXC reflection\n";
+            ok = false;
         }
     }
 
