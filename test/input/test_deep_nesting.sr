@@ -1,0 +1,23 @@
+// Deep Nesting + Mixed Arrays (tests recursion & inner padding)
+struct Level3 {
+    int a;
+    float b[5];
+    float3 c;
+};
+
+struct Level2 {
+    Level3 inner[3];
+    float4 vec;
+    bool flag;
+};
+
+struct Level1 {
+    Level2 mid;
+    matrix<float, 3, 3> mat;
+};
+
+cbuffer StressDeepNest {
+    Level1 topLevel;
+    float extraScalar;
+    float2 extraVec;
+};

@@ -1,0 +1,7 @@
+// Extremely Long Flat Buffer (tests performance & very long visualization)
+cbuffer StressLongFlat {
+    float  scalars[512];
+    int    ints[256];
+    float4 vectors[64];
+    float  trailing[17];        // odd length to force final padding
+};

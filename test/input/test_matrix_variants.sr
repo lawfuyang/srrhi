@@ -1,0 +1,9 @@
+// Matrix Variants + Post-Matrix Padding (tests alignment after matrices)
+cbuffer StressMatrices {
+    float4x4 rowMat;
+    float4x4 colMat;
+    float3x4 skinnyMat;
+    float scalarAfter;          // should force padding
+    float4 vecAfter;
+    matrix<float, 2, 2> smallMat;
+};

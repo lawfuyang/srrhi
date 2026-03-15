@@ -1,0 +1,7 @@
+// Classic padding trap
+cbuffer Test
+{
+    float3 position;
+    float  radius;
+    float4 color;
+};

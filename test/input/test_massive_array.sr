@@ -1,0 +1,14 @@
+// Huge Array of Complex Structs (tests layout size & array stride calculation)
+struct Particle {
+    float4 position;
+    float4 velocity;
+    float2 uv[4];
+    int flags[16];
+    float lifetime;
+};
+
+cbuffer StressMassiveArray {
+    Particle particles[128];     // 128 × large struct = thousands of bytes
+    float globalTime;
+    int frameIndex;
+};

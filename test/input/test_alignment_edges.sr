@@ -1,0 +1,12 @@
+// Alignment Edge Cases + Bool/Uint Arrays (classic padding traps)
+cbuffer StressAlignment {
+    bool   b1;                  // 4 bytes in cbuffer
+    int    i1;
+    float  f1;
+    float2 v2;
+    float3 v3;                  // 12 bytes + 4-byte pad
+    uint   uArray[7];
+    float4 v4;
+    bool   bArray[9];           // each bool = 4 bytes
+    float  finalScalar;
+};
