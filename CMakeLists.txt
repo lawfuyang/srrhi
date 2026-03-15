@@ -96,3 +96,14 @@ add_executable(${PROJECT_NAME} ${SOURCES})
 
 target_include_directories(${PROJECT_NAME} PRIVATE "${DXC_INSTALL_DIR}/inc")
 target_link_libraries(${PROJECT_NAME} PRIVATE "${DXC_INSTALL_DIR}/lib/x64/dxcompiler.lib" "${DXC_INSTALL_DIR}/lib/x64/dxil.lib")
+
+# Custom test target for running internal unit tests
+add_custom_target(test_srrhi
+    COMMAND ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/srrhi.exe
+        -i "${CMAKE_SOURCE_DIR}/test/input"
+        -o "${CMAKE_SOURCE_DIR}/test/output"
+        --test
+    DEPENDS ${PROJECT_NAME}
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+    COMMENT "Running srrhi unit tests..."
+)

@@ -55,6 +55,34 @@ static CppTypeInfo MapBuiltinToCpp(const BuiltinType& bt)
     return base;
 }
 
+// ---------------------------------------------------------------------------
+// Map float matrices to DirectX matrix types when applicable
+// ---------------------------------------------------------------------------
+static std::string MapMatrixType(const ArrayNode& arr)
+{
+    // Check if this is a float4x4 (or similar standard DirectX matrix)
+    if (!arr.m_bCreatedFromMatrix)
+        return "";
+
+    if (auto* elemBt = std::get_if<BuiltinType>(&arr.m_ElementType))
+    {
+        const std::string& sc = elemBt->m_ScalarName;
+        int rows = elemBt->m_VectorSize;      // element type vector size = rows
+        int cols = arr.m_ArraySize;            // array size = columns
+
+        // Check for float-based matrices
+        if ((sc == "float" || sc == "float32_t"))
+        {
+            // Map to DirectX types
+            if (rows == 3 && cols == 3) return "DirectX::XMFLOAT3X3";
+            if (rows == 4 && cols == 3) return "DirectX::XMFLOAT4X3";
+            if (rows == 3 && cols == 4) return "DirectX::XMFLOAT3X4";
+            if (rows == 4 && cols == 4) return "DirectX::XMFLOAT4X4";
+        }
+    }
+    return "";
+}
+
 static void EmitPadding(std::ostringstream& out, int padBytes, int& padCount,
                         const std::string& ind)
 {
@@ -136,32 +164,46 @@ static void EmitMembersCpp(std::ostringstream& out,
 
             if (arr.m_bCreatedFromMatrix)
             {
-                // Matrix: emit column-by-column
-                const BuiltinType* elemBt = std::get_if<BuiltinType>(&arr.m_ElementType);
-                if (elemBt)
+                // Try to map to DirectX matrix type
+                std::string matrixType = MapMatrixType(arr);
+                
+                if (!matrixType.empty())
                 {
-                    auto cti = MapBuiltinToCpp(*elemBt);
-                    int colDataElems = elemBt->m_VectorSize;
-                    int elemsPerSlot = 16 / elemBt->m_ElementSize;
-
-                    for (size_t c = 0; c < lm->m_Submembers.size(); ++c)
-                    {
-                        const LayoutMember& col = lm->m_Submembers[c];
-                        bool bLastCol = (c == lm->m_Submembers.size() - 1);
-                        std::string colName = mv.m_Name + "_c" + std::to_string(c);
-
-                        if (bLastCol)
-                            out << ind << cti.m_TypeName << " " << colName << "[" << colDataElems << "];\n";
-                        else
-                            out << ind << cti.m_TypeName << " " << colName << "[" << elemsPerSlot << "];\n";
-
-                        if (!bLastCol && col.m_Padding > 0)
-                            EmitPadding(out, col.m_Padding, padCount, ind);
-                        cursor = col.m_Offset + col.m_Size + (bLastCol ? lm->m_Padding : col.m_Padding);
-                    }
+                    // Use DirectX matrix type directly
+                    out << ind << matrixType << " " << mv.m_Name << ";\n";
                     if (lm->m_Padding > 0)
                         EmitPadding(out, lm->m_Padding, padCount, ind);
                     cursor = lm->m_Offset + lm->m_Size + lm->m_Padding;
+                }
+                else
+                {
+                    // Matrix: emit column-by-column (for non-standard matrices)
+                    const BuiltinType* elemBt = std::get_if<BuiltinType>(&arr.m_ElementType);
+                    if (elemBt)
+                    {
+                        auto cti = MapBuiltinToCpp(*elemBt);
+                        int colDataElems = elemBt->m_VectorSize;
+                        int elemsPerSlot = 16 / elemBt->m_ElementSize;
+
+                        for (size_t c = 0; c < lm->m_Submembers.size(); ++c)
+                        {
+                            const LayoutMember& col = lm->m_Submembers[c];
+                            bool bLastCol = (c == lm->m_Submembers.size() - 1);
+                            std::string colName = mv.m_Name + "_c" + std::to_string(c);
+
+                            if (bLastCol)
+                                out << ind << cti.m_TypeName << " " << colName << "[" << colDataElems << "];\n";
+                            else
+                                out << ind << cti.m_TypeName << " " << colName << "[" << elemsPerSlot << "];\n";
+
+                            if (!bLastCol && col.m_Padding > 0)
+                                EmitPadding(out, col.m_Padding, padCount, ind);
+                            cursor = col.m_Offset + col.m_Size + (bLastCol ? lm->m_Padding : col.m_Padding);
+                        }
+                        if (lm->m_Padding > 0)
+                            EmitPadding(out, lm->m_Padding, padCount, ind);
+                        cursor = lm->m_Offset + lm->m_Size + lm->m_Padding;
+                    }
                 }
             }
             else
@@ -238,11 +280,22 @@ static void EmitStructCpp(std::ostringstream& out, const StructType& st,
             const ArrayNode& arr = **ap;
             if (arr.m_bCreatedFromMatrix)
             {
-                // Matrix: emit as array of column vectors, e.g. float4x4 ? XMFLOAT4[4]
-                if (auto* elemBt = std::get_if<BuiltinType>(&arr.m_ElementType))
+                // Try to map to DirectX matrix type
+                std::string matrixType = MapMatrixType(arr);
+                
+                if (!matrixType.empty())
                 {
-                    auto cti = MapBuiltinToCpp(*elemBt);
-                    out << fInd << cti.m_TypeName << " " << mv.m_Name << "[" << arr.m_ArraySize << "];\n";
+                    // Use DirectX matrix type directly
+                    out << fInd << matrixType << " " << mv.m_Name << ";\n";
+                }
+                else
+                {
+                    // Matrix: emit as array of column vectors for non-standard matrices
+                    if (auto* elemBt = std::get_if<BuiltinType>(&arr.m_ElementType))
+                    {
+                        auto cti = MapBuiltinToCpp(*elemBt);
+                        out << fInd << cti.m_TypeName << " " << mv.m_Name << "[" << arr.m_ArraySize << "];\n";
+                    }
                 }
             }
             else
