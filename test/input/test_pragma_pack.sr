@@ -1,0 +1,8 @@
+// Test cbuffer with pragma pack - should fail
+#pragma pack(1)
+cbuffer BadCB2
+{
+    float4 v;
+    float f;
+};
+#pragma pack()

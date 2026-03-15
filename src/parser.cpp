@@ -471,6 +471,23 @@ struct Parser
             if (TryConsume(TokKind::LBracket))
                 fieldType = ParseArrayDims(std::move(fieldType));
 
+            // Check for and reject semantic annotations (e.g., packoffset)
+            if (Check(TokKind::Colon))
+            {
+                Advance(); // consume ':'
+                if (m_Cur.m_Kind == TokKind::Ident && m_Cur.m_Text == "packoffset")
+                {
+                    int lineNum = m_Cur.m_Line;
+                    LogMsg("[parser] ERROR: cbuffer member '%s' uses forbidden 'packoffset' semantic at line %d\n",
+                           nameTok.m_Text.c_str(), lineNum);
+                    throw std::runtime_error(m_FilePath + ":" + std::to_string(lineNum) +
+                                             ": cbuffer members cannot use 'packoffset' semantic");
+                }
+                // Skip other semantic annotations (like 'register')
+                while (!Check(TokKind::Semicolon) && !Check(TokKind::Comma) && !Check(TokKind::Eof))
+                    Advance();
+            }
+
             MemberVariable mv;
             mv.m_Type = std::move(fieldType);
             mv.m_Name = nameTok.m_Text;
@@ -525,8 +542,46 @@ struct Parser
     {
         while (!Check(TokKind::Eof))
         {
-            // #include
-            if (Check(TokKind::Hash)) { ParseInclude(); continue; }
+            // #include or other #pragma directives
+            if (Check(TokKind::Hash))
+            {
+                int hashLine = m_Cur.m_Line;
+                Advance(); // '#'
+                
+                // Handle #include
+                if (m_Cur.m_Kind == TokKind::Ident && m_Cur.m_Text == "include")
+                {
+                    // Backtrack to re-parse as include
+                    m_Cur = Token{ TokKind::Hash, "#", hashLine };
+                    ParseInclude();
+                    continue;
+                }
+                
+                // Reject #pragma pack directives
+                if (m_Cur.m_Kind == TokKind::Ident && m_Cur.m_Text == "pragma")
+                {
+                    Advance(); // consume 'pragma'
+                    if (m_Cur.m_Kind == TokKind::Ident && m_Cur.m_Text == "pack")
+                    {
+                        LogMsg("[parser] ERROR: forbidden '#pragma pack' directive at line %d\n", hashLine);
+                        throw std::runtime_error(m_FilePath + ":" + std::to_string(hashLine) +
+                                                 ": '#pragma pack' is not allowed in this file format");
+                    }
+                    // Skip unknown pragmas
+                    while (!Check(TokKind::Eof) && m_Cur.m_Kind != TokKind::Hash)
+                        Advance();
+                    continue;
+                }
+                
+                // Skip unknown hash directives
+                while (!Check(TokKind::Eof))
+                {
+                    if (m_Cur.m_Kind == TokKind::Hash)
+                        break;
+                    Advance();
+                }
+                continue;
+            }
 
             if (m_Cur.m_Kind != TokKind::Ident) { Advance(); continue; }
 

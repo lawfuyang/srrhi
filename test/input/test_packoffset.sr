@@ -1,0 +1,6 @@
+// Test cbuffer with packoffset - should fail
+cbuffer BadCB
+{
+    float4 v : packoffset(c0);
+    float f;
+};
