@@ -514,23 +514,113 @@ std::string GenerateCpp(const ParseResult& pr,
         }
     }
 
-    // Emit per-srinput namespaces with NumCBuffers + per-cbuffer register index constants
-    // Register numbers are assigned globally across all srinput scopes in definition order.
-    int globalRegNum = 0;
+    // Emit per-srinput classes with NumCBuffers/NumSRVs/NumUAVs + per-resource register index constants.
+    // CBuffer register numbers are assigned globally across all srinput scopes in definition order.
+    // SRV and UAV register numbers are local to each srinput scope (reset per scope).
+    int globalCbufRegNum = 0;
     for (const auto& srInputDef : pr.m_SrInputDefs)
     {
-        out << "namespace " << srInputDef.m_Name << "\n{\n";
+        // Count SRVs and UAVs for this srinput scope
+        uint32_t numSRVs = 0;
+        uint32_t numUAVs = 0;
+        for (const auto& rm : srInputDef.m_Resources)
+        {
+            if (IsUAV(rm.m_Kind)) ++numUAVs;
+            else                  ++numSRVs;
+        }
+
+        out << "struct " << srInputDef.m_Name << "\n{\n";
+
+        // CBuffer counts and register indices
         out << "    static constexpr uint32_t NumCBuffers = "
             << srInputDef.m_Members.size() << ";\n";
-
         for (const auto& member : srInputDef.m_Members)
         {
             const std::string constName = CleanMemberName(member.m_MemberName) + "RegisterIndex";
             out << "    static constexpr uint32_t " << constName << " = "
-                << globalRegNum++ << ";\n";
+                << globalCbufRegNum++ << ";\n";
         }
 
-        out << "}\n\n";
+        // SRV counts and register indices (t# registers, local per scope)
+        out << "    static constexpr uint32_t NumSRVs = " << numSRVs << ";\n";
+        {
+            uint32_t srvReg = 0;
+            for (const auto& rm : srInputDef.m_Resources)
+            {
+                if (!IsUAV(rm.m_Kind))
+                {
+                    const std::string constName = CleanMemberName(rm.m_MemberName) + "RegisterIndex";
+                    out << "    static constexpr uint32_t " << constName << " = "
+                        << srvReg++ << ";  // t" << (srvReg - 1) << "\n";
+                }
+            }
+        }
+
+        // UAV counts and register indices (u# registers, local per scope)
+        out << "    static constexpr uint32_t NumUAVs = " << numUAVs << ";\n";
+        {
+            uint32_t uavReg = 0;
+            for (const auto& rm : srInputDef.m_Resources)
+            {
+                if (IsUAV(rm.m_Kind))
+                {
+                    const std::string constName = CleanMemberName(rm.m_MemberName) + "RegisterIndex";
+                    out << "    static constexpr uint32_t " << constName << " = "
+                        << uavReg++ << ";  // u" << (uavReg - 1) << "\n";
+                }
+            }
+        }
+
+        out << "};\n\n";
+
+        if (bEmitValidation)
+        {
+            // Emit static_assert checks so the values are verified at compile time.
+            // These live in the generated header itself — no external tooling needed.
+            out << "// Compile-time register index checks for " << srInputDef.m_Name << "\n";
+
+            // Snapshot the register counters as they were at the start of this scope
+            int cbufStart = globalCbufRegNum - static_cast<int>(srInputDef.m_Members.size());
+            int cbufIdx = cbufStart;
+            out << "static_assert(" << srInputDef.m_Name << "::NumCBuffers == "
+                << srInputDef.m_Members.size() << "u);\n";
+            for (const auto& member : srInputDef.m_Members)
+            {
+                const std::string constName = CleanMemberName(member.m_MemberName) + "RegisterIndex";
+                out << "static_assert(" << srInputDef.m_Name << "::" << constName
+                    << " == " << cbufIdx++ << "u);\n";
+            }
+
+            out << "static_assert(" << srInputDef.m_Name << "::NumSRVs == " << numSRVs << "u);\n";
+            {
+                uint32_t srvReg = 0;
+                for (const auto& rm : srInputDef.m_Resources)
+                {
+                    if (!IsUAV(rm.m_Kind))
+                    {
+                        const std::string constName = CleanMemberName(rm.m_MemberName) + "RegisterIndex";
+                        out << "static_assert(" << srInputDef.m_Name << "::" << constName
+                            << " == " << srvReg++ << "u);\n";
+                    }
+                }
+            }
+
+            out << "static_assert(" << srInputDef.m_Name << "::NumUAVs == " << numUAVs << "u);\n";
+            {
+                uint32_t uavReg = 0;
+                for (const auto& rm : srInputDef.m_Resources)
+                {
+                    if (IsUAV(rm.m_Kind))
+                    {
+                        const std::string constName = CleanMemberName(rm.m_MemberName) + "RegisterIndex";
+                        out << "static_assert(" << srInputDef.m_Name << "::" << constName
+                            << " == " << uavReg++ << "u);\n";
+                    }
+                }
+            }
+        }  // if (bEmitValidation)
+
+        out << "\n";
     }
 
     out << "\n}  // namespace srrhi\n";
