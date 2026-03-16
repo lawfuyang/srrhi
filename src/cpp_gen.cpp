@@ -515,10 +515,7 @@ std::string GenerateCpp(const ParseResult& pr,
     }
 
     // Emit per-srinput classes with NumCBuffers/NumSRVs/NumUAVs/NumSamplers + per-resource register index constants.
-    // CBuffer register numbers are assigned globally across all srinput scopes in definition order.
-    // SRV and UAV register numbers are local to each srinput scope (reset per scope).
-    // Sampler register numbers are local to each srinput scope (reset per scope).
-    int globalCbufRegNum = 0;
+    // CBuffer, SRV, UAV, and sampler register numbers are all local to each srinput scope (reset per scope).
     for (const auto& srInputDef : pr.m_SrInputDefs)
     {
         // Count SRVs and UAVs for this srinput scope
@@ -533,14 +530,17 @@ std::string GenerateCpp(const ParseResult& pr,
 
         out << "struct " << srInputDef.m_Name << "\n{\n";
 
-        // CBuffer counts and register indices
+        // CBuffer counts and register indices (b# registers, local per scope)
         out << "    static constexpr uint32_t NumCBuffers = "
             << srInputDef.m_Members.size() << ";\n";
-        for (const auto& member : srInputDef.m_Members)
         {
-            const std::string constName = CleanMemberName(member.m_MemberName) + "RegisterIndex";
-            out << "    static constexpr uint32_t " << constName << " = "
-                << globalCbufRegNum++ << ";\n";
+            uint32_t cbufReg = 0;
+            for (const auto& member : srInputDef.m_Members)
+            {
+                const std::string constName = CleanMemberName(member.m_MemberName) + "RegisterIndex";
+                out << "    static constexpr uint32_t " << constName << " = "
+                    << cbufReg++ << ";  // b" << (cbufReg - 1) << "\n";
+            }
         }
 
         // SRV counts and register indices (t# registers, local per scope)
@@ -593,16 +593,16 @@ std::string GenerateCpp(const ParseResult& pr,
             // These live in the generated header itself — no external tooling needed.
             out << "// Compile-time register index checks for " << srInputDef.m_Name << "\n";
 
-            // Snapshot the register counters as they were at the start of this scope
-            int cbufStart = globalCbufRegNum - static_cast<int>(srInputDef.m_Members.size());
-            int cbufIdx = cbufStart;
             out << "static_assert(" << srInputDef.m_Name << "::NumCBuffers == "
                 << srInputDef.m_Members.size() << "u);\n";
-            for (const auto& member : srInputDef.m_Members)
             {
-                const std::string constName = CleanMemberName(member.m_MemberName) + "RegisterIndex";
-                out << "static_assert(" << srInputDef.m_Name << "::" << constName
-                    << " == " << cbufIdx++ << "u);\n";
+                uint32_t cbufReg = 0;
+                for (const auto& member : srInputDef.m_Members)
+                {
+                    const std::string constName = CleanMemberName(member.m_MemberName) + "RegisterIndex";
+                    out << "static_assert(" << srInputDef.m_Name << "::" << constName
+                        << " == " << cbufReg++ << "u);\n";
+                }
             }
 
             out << "static_assert(" << srInputDef.m_Name << "::NumSRVs == " << numSRVs << "u);\n";
