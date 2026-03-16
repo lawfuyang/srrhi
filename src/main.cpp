@@ -30,17 +30,14 @@ struct FileDeleter
 // ---------------------------------------------------------------------------
 // Global output handles
 // ---------------------------------------------------------------------------
-static std::unique_ptr<FILE, FileDeleter> g_Log; // output.txt
 static std::unique_ptr<FILE, FileDeleter> g_Vis; // visualizer_results.txt
 
 void LogMsg(const char* fmt, ...)
 {
-    if (!g_Log) return;
     va_list args;
     va_start(args, fmt);
-    vfprintf(g_Log.get(), fmt, args);
+    vprintf(fmt, args);
     va_end(args);
-    fflush(g_Log.get());
 }
 
 // ---------------------------------------------------------------------------
@@ -212,7 +209,7 @@ static void ProcessFile(const fs::path& srFile,
 // ---------------------------------------------------------------------------
 int main(int argc, char* argv[])
 {
-    // Derive bin directory from argv[0] to place output.txt beside the exe
+    // Derive bin directory from argv[0] to place visualizer_results.txt beside the exe
     fs::path binDir;
     try
     {
@@ -221,20 +218,6 @@ int main(int argc, char* argv[])
     catch (...)
     {
         binDir = fs::current_path();
-    }
-
-    // Open log file (output.txt in bin/)
-    {
-        fs::path logPath = binDir / "output.txt";
-        g_Log.reset(fopen(logPath.string().c_str(), "w"));
-        if (!g_Log)
-        {
-            // Last resort: print to stderr since logging is unavailable
-            fprintf(stderr, "[srrhi] FATAL: Cannot open log file: %s\n",
-                    logPath.string().c_str());
-            return 1;
-        }
-        LogMsg("[srrhi] Log opened: %s\n", logPath.string().c_str());
     }
 
     // Open visualizer results file (visualizer_results.txt in bin/)

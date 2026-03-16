@@ -28,8 +28,6 @@ echo Exit code: !errorlevel! >> "%output_file%"
 echo srrhi.exe completed >> "%output_file%"
 echo. >> "%output_file%"
 
-echo HLSL generation unit tests completed. see %PROJECT_ROOT%\bin\output.txt for more generation results
-
 REM Step 2: Run Python validation generation
 echo Step 2: Running generate_validation.py... >> "%output_file%"
 echo. >> "%output_file%"
