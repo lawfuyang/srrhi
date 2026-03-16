@@ -322,7 +322,8 @@ static void EmitMembersCpp(std::ostringstream& out,
 // Emit a cbuffer struct as a C++ class with private members + public setters
 // ---------------------------------------------------------------------------
 static void EmitClassCpp(std::ostringstream& out, const StructType& st,
-                          const LayoutMember& layout, int& padCount)
+                          const LayoutMember& layout, int& padCount,
+                          bool bEmitValidation)
 {
     // Collect setter infos before emitting (determines parameter types)
     auto setterInfos = CollectSetterInfos(st.m_Members, layout.m_Submembers);
@@ -331,8 +332,11 @@ static void EmitClassCpp(std::ostringstream& out, const StructType& st,
     for (const auto& si : setterInfos)
         if (si.m_bIsByteArray) { bNeedsMemcpy = true; break; }
 
-    out << "class alignas(16) " << st.m_Name << "\n{\nfriend struct " << st.m_Name
-        << "Validator;\nprivate:\n";
+    if (bEmitValidation)
+        out << "class alignas(16) " << st.m_Name << "\n{\nfriend struct " << st.m_Name
+            << "Validator;\nprivate:\n";
+    else
+        out << "class alignas(16) " << st.m_Name << "\n{\nprivate:\n";
 
     int localPadCount = padCount;
     EmitMembersCpp(out, st.m_Members, layout.m_Submembers, localPadCount, "    ",
@@ -375,19 +379,18 @@ static void EmitClassCpp(std::ostringstream& out, const StructType& st,
     }
 
     out << "};\n\n";
-    out << "// Friend validator struct for compile-time offset validation\n";
-    out << "struct " << st.m_Name << "Validator {\n";
-    
-    // Emit offsetof static_asserts directly in the struct body
-    // (they have friend access because this struct is befriended by the class above)
-    for (const auto& localMem : layout.m_Submembers)
+    if (bEmitValidation)
     {
-        out << "    static_assert(offsetof(" << st.m_Name << ", " << CleanMemberName(localMem.m_Name) 
-            << ") == " << localMem.m_Offset << ", \""
-            << st.m_Name << "::" << CleanMemberName(localMem.m_Name) << " offset check\");\n";
+        out << "// Friend validator struct for compile-time offset validation\n";
+        out << "struct " << st.m_Name << "Validator {\n";
+        for (const auto& localMem : layout.m_Submembers)
+        {
+            out << "    static_assert(offsetof(" << st.m_Name << ", " << CleanMemberName(localMem.m_Name)
+                << ") == " << localMem.m_Offset << ", \""
+                << st.m_Name << "::" << CleanMemberName(localMem.m_Name) << " offset check\");\n";
+        }
+        out << "};\n\n";
     }
-    
-    out << "};\n\n";
     (void)bNeedsMemcpy; // <cstring> included unconditionally when classes exist
 }
 
@@ -458,7 +461,7 @@ static void EmitStructCpp(std::ostringstream& out, const StructType& st,
 // ---------------------------------------------------------------------------
 std::string GenerateCpp(const ParseResult& pr,
                          const std::vector<LayoutMember>& layouts,
-                         int& padCount)
+                         int& padCount, bool bEmitValidation)
 {
     LogMsg("[cpp_gen] Generating C++ header...\n");
 
@@ -506,7 +509,7 @@ std::string GenerateCpp(const ParseResult& pr,
             if (bufLayout)
             {
                 int localPadCount = 0;
-                EmitClassCpp(out, bufDef, *bufLayout, localPadCount);
+                EmitClassCpp(out, bufDef, *bufLayout, localPadCount, bEmitValidation);
             }
         }
     }

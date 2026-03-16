@@ -14,7 +14,7 @@ namespace fs = std::filesystem;
 ParseResult ParseFile(const std::string& path);
 std::vector<LayoutMember> ComputeLayouts(ParseResult& pr);
 std::string GenerateHlsl(const ParseResult& pr, const std::vector<LayoutMember>& layouts, int& padCount);
-std::string GenerateCpp(const ParseResult& pr, const std::vector<LayoutMember>& layouts, int& padCount);
+std::string GenerateCpp(const ParseResult& pr, const std::vector<LayoutMember>& layouts, int& padCount, bool bEmitValidation);
 std::string VisualizeLayouts(const std::vector<LayoutMember>& layouts);
 std::string VisualizeLayoutsMachineReadable(const std::vector<LayoutMember>& layouts);
 int RunReflectionTests(const fs::path& testInputDir);
@@ -77,7 +77,8 @@ static std::string MakeHlslGuard(const fs::path& stem)
 static void ProcessFile(const fs::path& srFile,
                         const fs::path& inputRoot,
                         const fs::path& outputRoot,
-                        int& globalPadCount)
+                        int& globalPadCount,
+                        bool bEmitValidation)
 {
     LogMsg("[srrhi] Processing: %s\n", srFile.string().c_str());
 
@@ -180,7 +181,7 @@ static void ProcessFile(const fs::path& srFile,
     try
     {
         int padCount = globalPadCount;
-        std::string cppContent = GenerateCpp(pr, layouts, padCount);
+        std::string cppContent = GenerateCpp(pr, layouts, padCount, bEmitValidation);
 
         fs::path cppOut = outputRoot / "cpp" / stem;
         cppOut += ".h";
@@ -320,7 +321,7 @@ int main(int argc, char* argv[])
     {
         try
         {
-            ProcessFile(f, inputRoot, outputRoot, globalPadCount);
+            ProcessFile(f, inputRoot, outputRoot, globalPadCount, runTests);
         }
         catch (const std::exception& e)
         {
