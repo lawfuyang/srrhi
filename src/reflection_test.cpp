@@ -68,6 +68,10 @@ static const std::unordered_set<std::string> k_ExpectedFailStems = {
     "test_sampler_in_cbuffer",
     "test_sampler_in_struct",
     "test_sampler_cmp_in_cbuffer",
+    // Scalar const error tests
+    "test_srinput_scalar_bad_type",
+    "test_srinput_scalar_no_value",
+    "test_srinput_scalar_duplicate",
 };
 
 // ---------------------------------------------------------------------------

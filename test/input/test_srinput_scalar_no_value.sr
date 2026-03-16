@@ -1,0 +1,7 @@
+// ERROR TEST: scalar constant with no value (missing '=' and value).
+// Expected: parse error — '=' expected after scalar constant name.
+
+srinput MissingValueInputs
+{
+    static const float NoValue;
+};

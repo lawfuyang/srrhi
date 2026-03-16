@@ -731,6 +731,132 @@ struct Parser
                     if (m_Cur.m_Kind != TokKind::Ident)
                         throw std::runtime_error(m_FilePath + ":" + std::to_string(m_Cur.m_Line) +
                                                  ": expected type name in srinput scope");
+
+                    // ---- Scalar constant: [static] [const] scalarType name = value; ----
+                    // Consume optional "static" and/or "const" qualifiers.
+                    bool bHasStatic = false;
+                    bool bHasConst  = false;
+                    if (m_Cur.m_Kind == TokKind::Ident && m_Cur.m_Text == "static")
+                    {
+                        bHasStatic = true;
+                        Advance();
+                        if (m_Cur.m_Kind != TokKind::Ident)
+                            throw std::runtime_error(m_FilePath + ":" + std::to_string(m_Cur.m_Line) +
+                                                     ": expected 'const' or type name after 'static' in srinput scope");
+                    }
+                    if (m_Cur.m_Kind == TokKind::Ident && m_Cur.m_Text == "const")
+                    {
+                        bHasConst = true;
+                        Advance();
+                        if (m_Cur.m_Kind != TokKind::Ident)
+                            throw std::runtime_error(m_FilePath + ":" + std::to_string(m_Cur.m_Line) +
+                                                     ": expected type name after 'const' in srinput scope");
+                    }
+
+                    // If we consumed static/const, the next token must be a scalar type.
+                    // Peek ahead: if the token after the type name is '=' it's a scalar const.
+                    // We detect this by checking if the type name is in g_Scalars (scalar only,
+                    // not vector/matrix) and the token after the member name is '='.
+                    bool bIsScalarConst = false;
+                    if (bHasStatic || bHasConst)
+                    {
+                        // After static/const we MUST have a scalar type followed by name = value
+                        bIsScalarConst = true;
+                    }
+                    else
+                    {
+                        // No qualifiers: peek to see if this is "scalarType name = value;"
+                        // We do this by checking if the current ident is a scalar type name
+                        // and the token two positions ahead is '='.
+                        if (m_Cur.m_Kind == TokKind::Ident)
+                        {
+                            bool bIsScalar = false;
+                            for (auto& [key, info] : g_Scalars)
+                            {
+                                if (m_Cur.m_Text == key) { bIsScalar = true; break; }
+                            }
+                            if (bIsScalar)
+                            {
+                                // Save state, advance past type name and member name, check for '='
+                                size_t savedPos  = m_Lex.m_Pos;
+                                int    savedLine = m_Lex.m_Line;
+                                Token  savedCur  = m_Cur;
+                                Advance(); // consume type name
+                                if (m_Cur.m_Kind == TokKind::Ident)
+                                {
+                                    Advance(); // consume member name
+                                    if (m_Cur.m_Kind == TokKind::Unknown && m_Cur.m_Text == "=")
+                                        bIsScalarConst = true;
+                                }
+                                // Restore state
+                                m_Lex.m_Pos  = savedPos;
+                                m_Lex.m_Line = savedLine;
+                                m_Cur        = savedCur;
+                            }
+                        }
+                    }
+
+                    if (bIsScalarConst)
+                    {
+                        // Parse: scalarType name = value;
+                        if (m_Cur.m_Kind != TokKind::Ident)
+                            throw std::runtime_error(m_FilePath + ":" + std::to_string(m_Cur.m_Line) +
+                                                     ": expected scalar type name in srinput scalar constant");
+                        Token scalarTypeTok = m_Cur;
+                        int   scalarLine    = scalarTypeTok.m_Line;
+                        Advance();
+
+                        // Validate: must be a plain scalar (no vector/matrix suffix)
+                        bool bValidScalar = false;
+                        for (auto& [key, info] : g_Scalars)
+                        {
+                            if (scalarTypeTok.m_Text == key) { bValidScalar = true; break; }
+                        }
+                        if (!bValidScalar)
+                            throw std::runtime_error(m_FilePath + ":" + std::to_string(scalarLine) +
+                                                     ": '" + scalarTypeTok.m_Text +
+                                                     "' is not a valid scalar type for srinput scalar constant");
+
+                        Token nameTok = Expect(TokKind::Ident, "scalar constant name");
+
+                        // Expect '='
+                        if (m_Cur.m_Kind != TokKind::Unknown || m_Cur.m_Text != "=")
+                            throw std::runtime_error(m_FilePath + ":" + std::to_string(m_Cur.m_Line) +
+                                                     ": expected '=' after scalar constant name");
+                        Advance(); // consume '='
+
+                        // Parse value: collect tokens until ';', concatenating without spaces
+                        // so that "1000.0" (tokenized as "1000", ".", "0") and "-1"
+                        // (tokenized as "-", "1") are reconstructed correctly.
+                        std::string valueStr;
+                        while (!Check(TokKind::Semicolon) && !Check(TokKind::Eof))
+                        {
+                            valueStr += m_Cur.m_Text;
+                            Advance();
+                        }
+                        Expect(TokKind::Semicolon, ";");
+
+                        if (valueStr.empty())
+                            throw std::runtime_error(m_FilePath + ":" + std::to_string(nameTok.m_Line) +
+                                                     ": scalar constant '" + nameTok.m_Text + "' has no value");
+
+                        if (!srInputMemberNames.insert(nameTok.m_Text).second)
+                        {
+                            LogMsg("[parser] ERROR: duplicate member name '%s' in srinput '%s' at line %d\n",
+                                   nameTok.m_Text.c_str(), srInputDef.m_Name.c_str(), nameTok.m_Line);
+                            throw std::runtime_error(m_FilePath + ":" + std::to_string(nameTok.m_Line) +
+                                                     ": duplicate member name '" + nameTok.m_Text +
+                                                     "' in srinput '" + srInputDef.m_Name + "'");
+                        }
+
+                        ScalarConst sc;
+                        sc.m_TypeName = scalarTypeTok.m_Text;
+                        sc.m_Name     = nameTok.m_Text;
+                        sc.m_Value    = valueStr;
+                        srInputDef.m_ScalarConsts.push_back(std::move(sc));
+                        continue;
+                    }
+
                     Token typeName = m_Cur; Advance();
                     int typeLine = typeName.m_Line;
 

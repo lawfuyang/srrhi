@@ -1,0 +1,8 @@
+// ERROR TEST: duplicate scalar constant name inside srinput.
+// Expected: parse error — duplicate member name.
+
+srinput DupScalarInputs
+{
+    static const float MaxDist = 100.0;
+    static const float MaxDist = 200.0;
+};

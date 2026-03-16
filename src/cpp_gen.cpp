@@ -585,6 +585,25 @@ std::string GenerateCpp(const ParseResult& pr,
             }
         }
 
+        // Scalar constants declared in the srinput block
+        for (const auto& sc : srInputDef.m_ScalarConsts)
+        {
+            // Map HLSL scalar type to C++ type for constexpr
+            std::string cppType = sc.m_TypeName;
+            if (cppType == "float" || cppType == "float32_t") cppType = "float";
+            else if (cppType == "double" || cppType == "float64_t") cppType = "double";
+            else if (cppType == "float16_t") cppType = "uint16_t";  // closest 2-byte C type
+            else if (cppType == "int" || cppType == "int32_t") cppType = "int32_t";
+            else if (cppType == "uint" || cppType == "uint32_t") cppType = "uint32_t";
+            else if (cppType == "int16_t") cppType = "int16_t";
+            else if (cppType == "uint16_t") cppType = "uint16_t";
+            else if (cppType == "int64_t") cppType = "int64_t";
+            else if (cppType == "uint64_t") cppType = "uint64_t";
+            else if (cppType == "bool") cppType = "bool";
+            out << "    static constexpr " << cppType << " " << sc.m_Name
+                << " = " << sc.m_Value << ";\n";
+        }
+
         out << "};\n\n";
 
         if (bEmitValidation)

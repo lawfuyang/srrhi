@@ -1,0 +1,7 @@
+// ERROR TEST: scalar constant with an unknown/invalid type inside srinput.
+// Expected: parse error — "float3" is a vector type, not a plain scalar.
+
+srinput BadScalarInputs
+{
+    static const float3 BadVec = 1;
+};

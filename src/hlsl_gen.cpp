@@ -342,6 +342,19 @@ std::string GenerateHlsl(const ParseResult& pr,
                 << "() { return " << globalVarName << "; }\n";
         }
 
+        // Emit scalar constants as static const declarations
+        for (const auto& sc : srInputDef.m_ScalarConsts)
+        {
+            // Map C-style type aliases to canonical HLSL type names
+            std::string hlslType = sc.m_TypeName;
+            if (hlslType == "int32_t")   hlslType = "int";
+            else if (hlslType == "uint32_t")  hlslType = "uint";
+            else if (hlslType == "float32_t") hlslType = "float";
+            else if (hlslType == "float64_t") hlslType = "double";
+            out << "    static const " << hlslType << " " << sc.m_Name
+                << " = " << sc.m_Value << ";\n";
+        }
+
         out << "}\n\n";
     }
 
