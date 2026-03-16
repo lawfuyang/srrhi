@@ -1,0 +1,30 @@
+// Tests samplers across multiple srinput scopes.
+// Verifies that sampler register indices are local (reset) per srinput scope.
+
+cbuffer FrameConsts
+{
+    float4x4 viewProj;
+    float    time;
+};
+
+cbuffer ShadowConsts
+{
+    float4x4 shadowMatrix;
+    float    shadowBias;
+};
+
+srinput GBufferPass
+{
+    FrameConsts            m_Frame;
+    Texture2D<float4>      m_AlbedoTex;
+    SamplerState           m_LinearSampler;
+    SamplerComparisonState m_CmpSampler;
+};
+
+srinput ShadowPass
+{
+    ShadowConsts           m_Shadow;
+    Texture2D<float>       m_ShadowMap;
+    SamplerComparisonState m_ShadowSampler;
+    SamplerState           m_PointSampler;
+};

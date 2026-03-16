@@ -465,6 +465,15 @@ struct Parser
             throw std::runtime_error(m_FilePath + ":" + std::to_string(m_Cur.m_Line) +
                                      ": anonymous/inner struct definitions are not supported");
 
+        // Reject sampler types in cbuffer/struct context
+        if (m_Cur.m_Kind == TokKind::Ident &&
+            (m_Cur.m_Text == "SamplerState" || m_Cur.m_Text == "SamplerComparisonState"))
+        {
+            throw std::runtime_error(m_FilePath + ":" + std::to_string(m_Cur.m_Line) +
+                                     ": sampler type '" + m_Cur.m_Text +
+                                     "' is not allowed in cbuffer or struct; use it inside an srinput block");
+        }
+
         TypeRef memberType = ParseNonStructType();
 
         do
@@ -774,6 +783,42 @@ struct Parser
                         { "RWStructuredBuffer",              ResourceKind::RWStructuredBuffer },
                         { "RWByteAddressBuffer",             ResourceKind::RWByteAddressBuffer },
                     };
+
+                    // ---- Check for sampler types ----
+                    static const std::vector<std::pair<std::string, SamplerKind>> k_SamplerKinds = {
+                        { "SamplerComparisonState", SamplerKind::SamplerComparisonState },
+                        { "SamplerState",           SamplerKind::SamplerState },
+                    };
+
+                    SamplerKind foundSamplerKind = SamplerKind::SamplerState; // placeholder
+                    bool bIsSampler = false;
+                    for (const auto& [name, kind] : k_SamplerKinds)
+                    {
+                        if (typeName.m_Text == name) { foundSamplerKind = kind; bIsSampler = true; break; }
+                    }
+
+                    if (bIsSampler)
+                    {
+                        // ---- Sampler member ----
+                        Token memberName = Expect(TokKind::Ident, "member name in srinput");
+                        Expect(TokKind::Semicolon, ";");
+
+                        if (!srInputMemberNames.insert(memberName.m_Text).second)
+                        {
+                            LogMsg("[parser] ERROR: duplicate member name '%s' in srinput '%s' at line %d\n",
+                                   memberName.m_Text.c_str(), srInputDef.m_Name.c_str(), memberName.m_Line);
+                            throw std::runtime_error(m_FilePath + ":" + std::to_string(memberName.m_Line) +
+                                                     ": duplicate member name '" + memberName.m_Text +
+                                                     "' in srinput '" + srInputDef.m_Name + "'");
+                        }
+
+                        SamplerMember sm;
+                        sm.m_Kind       = foundSamplerKind;
+                        sm.m_TypeName   = typeName.m_Text;
+                        sm.m_MemberName = memberName.m_Text;
+                        srInputDef.m_Samplers.push_back(std::move(sm));
+                        continue;
+                    }
 
                     ResourceKind foundKind = ResourceKind::Texture2D; // placeholder
                     bool bIsResource = false;

@@ -1,0 +1,8 @@
+// ERROR TEST: SamplerState is not allowed inside a struct.
+// Expected: parse error.
+
+struct BadStruct
+{
+    float4x4     transform;
+    SamplerState m_Sampler;
+};

@@ -1,0 +1,19 @@
+// Tests multiple samplers (SamplerState and SamplerComparisonState) in one srinput.
+// Verifies s0, s1, s2 register assignments and getter generation.
+
+cbuffer SceneConsts
+{
+    float4x4 viewProj;
+    float3   cameraPos;
+    float    time;
+};
+
+srinput LightingPass
+{
+    SceneConsts              m_Scene;
+    Texture2D<float4>        m_AlbedoTex;
+    Texture2D<float4>        m_NormalTex;
+    SamplerState             m_LinearSampler;
+    SamplerState             m_PointSampler;
+    SamplerComparisonState   m_ShadowSampler;
+};

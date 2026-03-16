@@ -297,6 +297,22 @@ std::string GenerateHlsl(const ParseResult& pr,
             out << "\n";
     }
 
+    // Emit per-srinput sampler declarations (s# registers, local per scope).
+    LogMsg("[hlsl_gen]   Emitting sampler declarations...\n");
+    for (const auto& srInputDef : pr.m_SrInputDefs)
+    {
+        int samplerReg = 0;
+        for (const auto& sm : srInputDef.m_Samplers)
+        {
+            const std::string cleanedName = CleanMemberName(sm.m_MemberName);
+            const std::string globalVarName = srInputDef.m_Name + "_" + cleanedName;
+            out << sm.m_TypeName << " " << globalVarName
+                << " : register(s" << samplerReg++ << ");\n";
+        }
+        if (!srInputDef.m_Samplers.empty())
+            out << "\n";
+    }
+
     // Emit per-srinput namespaces with getter functions
     for (const auto& srInputDef : pr.m_SrInputDefs)
     {
@@ -314,6 +330,15 @@ std::string GenerateHlsl(const ParseResult& pr,
             const std::string cleanedName = CleanMemberName(rm.m_MemberName);
             const std::string globalVarName = srInputDef.m_Name + "_" + cleanedName;
             out << "    " << rm.m_TypeName << " Get" << cleanedName
+                << "() { return " << globalVarName << "; }\n";
+        }
+
+        // Emit sampler getter functions
+        for (const auto& sm : srInputDef.m_Samplers)
+        {
+            const std::string cleanedName = CleanMemberName(sm.m_MemberName);
+            const std::string globalVarName = srInputDef.m_Name + "_" + cleanedName;
+            out << "    " << sm.m_TypeName << " Get" << cleanedName
                 << "() { return " << globalVarName << "; }\n";
         }
 

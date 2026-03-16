@@ -64,6 +64,10 @@ static const std::unordered_set<std::string> k_ExpectedFailStems = {
     "test_resource_buffer_no_template",
     "test_resource_rwbuffer_no_template",
     "test_resource_structuredbuffer_no_template",
+    // Sampler-related error tests
+    "test_sampler_in_cbuffer",
+    "test_sampler_in_struct",
+    "test_sampler_cmp_in_cbuffer",
 };
 
 // ---------------------------------------------------------------------------

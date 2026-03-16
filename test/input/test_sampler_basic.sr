@@ -1,0 +1,14 @@
+// Tests basic SamplerState declaration inside an srinput block.
+// Verifies s0 register assignment and getter generation.
+
+cbuffer FrameConsts
+{
+    float4x4 viewProj;
+    float    time;
+};
+
+srinput BasicSamplerPass
+{
+    FrameConsts  m_Frame;
+    SamplerState m_LinearSampler;
+};

@@ -1,0 +1,8 @@
+// ERROR TEST: SamplerComparisonState is not allowed inside a cbuffer.
+// Expected: parse error.
+
+cbuffer BadBuffer
+{
+    float4x4               viewProj;
+    SamplerComparisonState m_CmpSampler;
+};

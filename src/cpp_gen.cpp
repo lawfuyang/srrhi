@@ -514,9 +514,10 @@ std::string GenerateCpp(const ParseResult& pr,
         }
     }
 
-    // Emit per-srinput classes with NumCBuffers/NumSRVs/NumUAVs + per-resource register index constants.
+    // Emit per-srinput classes with NumCBuffers/NumSRVs/NumUAVs/NumSamplers + per-resource register index constants.
     // CBuffer register numbers are assigned globally across all srinput scopes in definition order.
     // SRV and UAV register numbers are local to each srinput scope (reset per scope).
+    // Sampler register numbers are local to each srinput scope (reset per scope).
     int globalCbufRegNum = 0;
     for (const auto& srInputDef : pr.m_SrInputDefs)
     {
@@ -528,6 +529,7 @@ std::string GenerateCpp(const ParseResult& pr,
             if (IsUAV(rm.m_Kind)) ++numUAVs;
             else                  ++numSRVs;
         }
+        uint32_t numSamplers = static_cast<uint32_t>(srInputDef.m_Samplers.size());
 
         out << "struct " << srInputDef.m_Name << "\n{\n";
 
@@ -568,6 +570,18 @@ std::string GenerateCpp(const ParseResult& pr,
                     out << "    static constexpr uint32_t " << constName << " = "
                         << uavReg++ << ";  // u" << (uavReg - 1) << "\n";
                 }
+            }
+        }
+
+        // Sampler counts and register indices (s# registers, local per scope)
+        out << "    static constexpr uint32_t NumSamplers = " << numSamplers << ";\n";
+        {
+            uint32_t samplerReg = 0;
+            for (const auto& sm : srInputDef.m_Samplers)
+            {
+                const std::string constName = CleanMemberName(sm.m_MemberName) + "RegisterIndex";
+                out << "    static constexpr uint32_t " << constName << " = "
+                    << samplerReg++ << ";  // s" << (samplerReg - 1) << "\n";
             }
         }
 
@@ -616,6 +630,17 @@ std::string GenerateCpp(const ParseResult& pr,
                         out << "static_assert(" << srInputDef.m_Name << "::" << constName
                             << " == " << uavReg++ << "u);\n";
                     }
+                }
+            }
+
+            out << "static_assert(" << srInputDef.m_Name << "::NumSamplers == " << numSamplers << "u);\n";
+            {
+                uint32_t samplerReg = 0;
+                for (const auto& sm : srInputDef.m_Samplers)
+                {
+                    const std::string constName = CleanMemberName(sm.m_MemberName) + "RegisterIndex";
+                    out << "static_assert(" << srInputDef.m_Name << "::" << constName
+                        << " == " << samplerReg++ << "u);\n";
                 }
             }
         }  // if (bEmitValidation)

@@ -143,16 +143,41 @@ struct ResourceMember
 };
 
 // ---------------------------------------------------------------------------
-// SrInputDef: srinput scope containing cbuffer references and resource members
+// SamplerKind: the category of an HLSL sampler object.
+// ---------------------------------------------------------------------------
+enum class SamplerKind
+{
+    SamplerState,
+    SamplerComparisonState,
+};
+
+// ---------------------------------------------------------------------------
+// SamplerMember: a sampler declared inside an srinput block.
+//   m_Kind       – sampler type (SamplerState or SamplerComparisonState)
+//   m_TypeName   – HLSL type string, e.g. "SamplerState"
+//   m_MemberName – variable name declared in the srinput block
+// ---------------------------------------------------------------------------
+struct SamplerMember
+{
+    SamplerKind m_Kind;
+    std::string m_TypeName;   // e.g. "SamplerState" or "SamplerComparisonState"
+    std::string m_MemberName;
+};
+
+// ---------------------------------------------------------------------------
+// SrInputDef: srinput scope containing cbuffer references, resource members,
+//             and sampler members.
 //   m_Name      – name of the srinput scope
 //   m_Members   – list of cbuffer references, order determines register assignment
 //   m_Resources – list of SRV/UAV resource members, order determines t#/u# assignment
+//   m_Samplers  – list of sampler members, order determines s# register assignment
 // ---------------------------------------------------------------------------
 struct SrInputDef
 {
-    std::string                m_Name;
-    std::vector<SrInputMember> m_Members;
+    std::string                 m_Name;
+    std::vector<SrInputMember>  m_Members;
     std::vector<ResourceMember> m_Resources;
+    std::vector<SamplerMember>  m_Samplers;
 };
 
 // ---------------------------------------------------------------------------

@@ -1,0 +1,8 @@
+// Tests samplers-only srinput (no cbuffers, no resources).
+// Verifies NumCBuffers=0, NumSRVs=0, NumUAVs=0, NumSamplers=2.
+
+srinput SamplerOnlyPass
+{
+    SamplerState           m_LinearSampler;
+    SamplerComparisonState m_ShadowSampler;
+};
