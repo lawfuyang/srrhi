@@ -78,6 +78,8 @@ function(download_library LIB_NAME LIB_VERSION DOWNLOAD_URL LIB_PATTERN)
     endif()
 endfunction()
 
+file(MAKE_DIRECTORY "${CMAKE_SOURCE_DIR}/bin")
+
 set(DXC_VERSION "v1.9.2602")
 set(DXC_URL "https://github.com/microsoft/DirectXShaderCompiler/releases/download/${DXC_VERSION}/dxc_2026_02_20.zip")
 download_library("dxc" "${DXC_VERSION}" "${DXC_URL}" "dxc_*")
