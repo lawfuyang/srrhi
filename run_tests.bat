@@ -8,14 +8,15 @@ cd /d "%~dp0"
 REM Set project root
 set PROJECT_ROOT=%cd%
 
-REM Create output file with timestamp
-for /f "tokens=2-4 delims=/ " %%a in ('date /t') do (set mydate=%%c-%%a-%%b)
-for /f "tokens=1-2 delims=/:" %%a in ('time /t') do (set mytime=%%a%%b)
+REM Create output file with timestamp (ISO 8601: YYYYMMDD_HHMMSS for correct lexicographic sort)
+set mydate=%date:~10,4%%date:~4,2%%date:~7,2%
+set mytime=%time:~0,2%%time:~3,2%%time:~6,2%
+set mytime=%mytime: =0%
 set output_file=%PROJECT_ROOT%\bin\test_results_%mydate%_%mytime%.txt
 
 echo ================================== >> "%output_file%"
 echo SRRHI Unit Test Execution >> "%output_file%"
-echo Started: %mydate% %mytime% >> "%output_file%"
+echo Started: %mydate%_%mytime% >> "%output_file%"
 echo ================================== >> "%output_file%"
 echo. >> "%output_file%"
 
@@ -44,16 +45,24 @@ echo Exit code: !errorlevel! >> "%output_file%"
 echo generate_validation.py completed >> "%output_file%"
 echo. >> "%output_file%"
 
-REM Step 4: Rebuild validation stubs that now include the updated headers
-echo Step 4: Rebuilding validation stubs... >> "%output_file%"
+REM Step 4: Run cmake configure to generate any new validation targets
+echo Step 4: Running cmake configure... >> "%output_file%"
+echo. >> "%output_file%"
+cmake "%PROJECT_ROOT%" -B "%PROJECT_ROOT%\build" >> "%output_file%" 2>&1
+echo Exit code: !errorlevel! >> "%output_file%"
+echo cmake configure completed >> "%output_file%"
+echo. >> "%output_file%"
+
+REM Step 5: Rebuild validation stubs that now include the updated headers
+echo Step 5: Rebuilding validation stubs... >> "%output_file%"
 echo. >> "%output_file%"
 cmake --build "%PROJECT_ROOT%\build" --target ALL_BUILD >> "%output_file%" 2>&1
 echo Exit code: !errorlevel! >> "%output_file%"
 echo Rebuild completed >> "%output_file%"
 echo. >> "%output_file%"
 
-REM Step 5: Run all validation executables
-echo Step 4: Running all validation executables... >> "%output_file%"
+REM Step 6: Run all validation executables
+echo Step 6: Running all validation executables... >> "%output_file%"
 echo. >> "%output_file%"
 
 for /f "delims=" %%f in ('dir /b "%PROJECT_ROOT%\bin\validation_*.exe"') do (
@@ -68,9 +77,10 @@ for /f "delims=" %%f in ('dir /b "%PROJECT_ROOT%\bin\validation_*.exe"') do (
 REM Final summary
 echo. >> "%output_file%"
 echo ================================== >> "%output_file%"
-for /f "tokens=2-4 delims=/ " %%a in ('date /t') do (set mydate2=%%c-%%a-%%b)
-for /f "tokens=1-2 delims=/:" %%a in ('time /t') do (set mytime2=%%a%%b)
-echo Finished: %mydate2% %mytime2% >> "%output_file%"
+set mydate2=%date:~10,4%%date:~4,2%%date:~7,2%
+set mytime2=%time:~0,2%%time:~3,2%%time:~6,2%
+set mytime2=%mytime2: =0%
+echo Finished: %mydate2%_%mytime2% >> "%output_file%"
 echo ================================== >> "%output_file%"
 
 echo.

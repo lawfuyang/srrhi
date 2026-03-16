@@ -604,6 +604,16 @@ std::string GenerateCpp(const ParseResult& pr,
                 << " = " << sc.m_Value << ";\n";
         }
 
+        // Compose cbuffer structs directly as member variables
+        if (!srInputDef.m_Members.empty())
+        {
+            out << "\n";
+            for (const auto& member : srInputDef.m_Members)
+            {
+                out << "    " << member.m_CBufferName << " " << member.m_MemberName << ";\n";
+            }
+        }
+
         out << "};\n\n";
 
         if (bEmitValidation)
