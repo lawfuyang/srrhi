@@ -21,9 +21,9 @@ echo. >> "%output_file%"
 
 REM Step 1: Run srrhi.exe
 echo Step 1: Running srrhi.exe with test input... >> "%output_file%"
-echo Command: %PROJECT_ROOT%\bin\srrhi.exe -i %PROJECT_ROOT%\test\input -o %PROJECT_ROOT%\test\output --test
+echo Command: %PROJECT_ROOT%\bin\srrhi.exe -i %PROJECT_ROOT%\test\input -o %PROJECT_ROOT%\test\output --test >> "%output_file%"
 echo. >> "%output_file%"
-"%PROJECT_ROOT%\bin\srrhi.exe" -i "%PROJECT_ROOT%\test\input" -o "%PROJECT_ROOT%\test\output" --test
+"%PROJECT_ROOT%\bin\srrhi.exe" -i "%PROJECT_ROOT%\test\input" -o "%PROJECT_ROOT%\test\output" --test >> "%output_file%"
 echo Exit code: !errorlevel! >> "%output_file%"
 echo srrhi.exe completed >> "%output_file%"
 echo. >> "%output_file%"

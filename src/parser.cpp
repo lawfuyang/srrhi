@@ -689,7 +689,7 @@ struct Parser
                 continue;
             }
 
-            // ---- srinput Name { cbuffers }; ----
+            // ---- srinput Name { cbuffers / resources }; ----
             if (kw == "srinput")
             {
                 Advance();
@@ -701,41 +701,166 @@ struct Parser
 
                 while (!Check(TokKind::RBrace) && !Check(TokKind::Eof))
                 {
-                    // Expect: typeName memberName;
+                    // Expect: typeName [<templateArg>] memberName;
                     if (m_Cur.m_Kind != TokKind::Ident)
                         throw std::runtime_error(m_FilePath + ":" + std::to_string(m_Cur.m_Line) +
                                                  ": expected type name in srinput scope");
                     Token typeName = m_Cur; Advance();
+                    int typeLine = typeName.m_Line;
 
-                    // Check if the type exists and is a cbuffer
-                    // First, look in m_StructMap (user-defined structs)
-                    // Then, check if it's a cbuffer type in m_Result.m_BufferDefs
-                    bool bIsCBufferType = false;
-                    
-                    // Search through BufferDefs to see if this is a cbuffer name
-                    for (const auto& bufDef : m_Result.m_BufferDefs)
+                    // ---- Check for unsupported resource types (throw immediately) ----
+                    static const std::vector<std::string> k_UnsupportedResources = {
+                        "TextureBuffer",
+                        "RWTexture2DMS", "RWTexture2DMSArray",
+                        "RWTextureCube", "RWTextureCubeArray",
+                        "AppendStructuredBuffer",
+                        "ConsumeStructuredBuffer",
+                        "RasterizerOrderedBuffer",
+                        "RasterizerOrderedByteAddressBuffer",
+                        "RasterizerOrderedStructuredBuffer",
+                        "RasterizerOrderedTexture1D",
+                        "RasterizerOrderedTexture1DArray",
+                        "RasterizerOrderedTexture2D",
+                        "RasterizerOrderedTexture2DArray",
+                        "RasterizerOrderedTexture3D",
+                        "FeedbackTexture2D",
+                        "FeedbackTexture2DArray",
+                    };
+                    for (const auto& unsup : k_UnsupportedResources)
                     {
-                        if (bufDef.m_Name == typeName.m_Text)
+                        if (typeName.m_Text == unsup)
+                            throw std::runtime_error(m_FilePath + ":" + std::to_string(typeLine) +
+                                                     ": resource type '" + unsup + "' is not supported");
+                    }
+
+                    // ---- Map keyword to ResourceKind (if it is a resource type) ----
+                    static const std::vector<std::pair<std::string, ResourceKind>> k_ResourceKinds = {
+                        { "Texture1D",                       ResourceKind::Texture1D },
+                        { "Texture1DArray",                  ResourceKind::Texture1DArray },
+                        { "Texture2DMS",                     ResourceKind::Texture2DMS },
+                        { "Texture2DMSArray",                ResourceKind::Texture2DMSArray },
+                        { "Texture2DArray",                  ResourceKind::Texture2DArray },
+                        { "Texture2D",                       ResourceKind::Texture2D },
+                        { "Texture3D",                       ResourceKind::Texture3D },
+                        { "TextureCubeArray",                ResourceKind::TextureCubeArray },
+                        { "TextureCube",                     ResourceKind::TextureCube },
+                        { "Buffer",                          ResourceKind::Buffer },
+                        { "StructuredBuffer",                ResourceKind::StructuredBuffer },
+                        { "ByteAddressBuffer",               ResourceKind::ByteAddressBuffer },
+                        { "RaytracingAccelerationStructure", ResourceKind::RaytracingAccelerationStructure },
+                        { "RWTexture1DArray",                ResourceKind::RWTexture1DArray },
+                        { "RWTexture1D",                     ResourceKind::RWTexture1D },
+                        { "RWTexture2DArray",                ResourceKind::RWTexture2DArray },
+                        { "RWTexture2D",                     ResourceKind::RWTexture2D },
+                        { "RWTexture3D",                     ResourceKind::RWTexture3D },
+                        { "RWBuffer",                        ResourceKind::RWBuffer },
+                        { "RWStructuredBuffer",              ResourceKind::RWStructuredBuffer },
+                        { "RWByteAddressBuffer",             ResourceKind::RWByteAddressBuffer },
+                    };
+
+                    ResourceKind foundKind = ResourceKind::Texture2D; // placeholder
+                    bool bIsResource = false;
+                    for (const auto& [name, kind] : k_ResourceKinds)
+                    {
+                        if (typeName.m_Text == name) { foundKind = kind; bIsResource = true; break; }
+                    }
+
+                    if (bIsResource)
+                    {
+                        // ---- Resource member ----
+                        // Types that never take a template arg:
+                        bool bNoTemplateArg =
+                            foundKind == ResourceKind::ByteAddressBuffer ||
+                            foundKind == ResourceKind::RWByteAddressBuffer ||
+                            foundKind == ResourceKind::RaytracingAccelerationStructure;
+
+                        // UAV types and typed buffer SRVs MUST have a template arg.
+                        // SRV texture types (Texture1D/2D/3D/Cube and their array/MS variants)
+                        // may omit <T> (DXC defaults to float4).
+                        bool bTemplateRequired =
+                            !bNoTemplateArg && (
+                                IsUAV(foundKind) ||
+                                foundKind == ResourceKind::Buffer ||
+                                foundKind == ResourceKind::StructuredBuffer
+                            );
+
+                        std::string templateArg;
+                        std::string fullTypeName = typeName.m_Text;
+
+                        if (!bNoTemplateArg && Check(TokKind::LAngle))
                         {
-                            bIsCBufferType = true;
-                            break;
+                            // Parse <templateArg> — may be a builtin type or a struct name.
+                            Advance(); // consume '<'
+                            if (m_Cur.m_Kind != TokKind::Ident)
+                                throw std::runtime_error(m_FilePath + ":" + std::to_string(m_Cur.m_Line) +
+                                                         ": expected type argument inside '<>'");
+                            Token argTok = m_Cur; Advance();
+                            templateArg = argTok.m_Text;
+
+                            // Validate: if it looks like a struct name, it must be visible.
+                            // First check if it's a known builtin scalar/vector.
+                            bool bIsBuiltin = false;
+                            for (auto& [key, info] : g_Scalars)
+                                if (templateArg.rfind(key, 0) == 0) { bIsBuiltin = true; break; }
+
+                            if (!bIsBuiltin)
+                            {
+                                // Must be a user-defined struct visible at this scope.
+                                if (m_StructMap.find(templateArg) == m_StructMap.end())
+                                    throw std::runtime_error(m_FilePath + ":" + std::to_string(argTok.m_Line) +
+                                                             ": resource template argument '" + templateArg +
+                                                             "' is not a visible struct or builtin type");
+                            }
+
+                            Expect(TokKind::RAngle, ">");
+                            fullTypeName = typeName.m_Text + "<" + templateArg + ">";
                         }
-                    }
+                        else if (bTemplateRequired)
+                        {
+                            // UAV / Buffer / StructuredBuffer without <T> — DXC compile error.
+                            throw std::runtime_error(m_FilePath + ":" + std::to_string(typeLine) +
+                                                     ": '" + typeName.m_Text +
+                                                     "' requires a template type argument, e.g. <float4>");
+                        }
 
-                    if (!bIsCBufferType)
+                        Token memberName = Expect(TokKind::Ident, "member name in srinput");
+                        Expect(TokKind::Semicolon, ";");
+
+                        ResourceMember rm;
+                        rm.m_Kind        = foundKind;
+                        rm.m_TypeName    = fullTypeName;
+                        rm.m_TemplateArg = templateArg;
+                        rm.m_MemberName  = memberName.m_Text;
+                        srInputDef.m_Resources.push_back(std::move(rm));
+                    }
+                    else
                     {
-                        throw std::runtime_error(m_FilePath + ":" + std::to_string(typeName.m_Line) +
-                                                 ": srinput scope only allows cbuffer types; '" +
-                                                 typeName.m_Text + "' is not a cbuffer");
+                        // ---- cbuffer reference ----
+                        bool bIsCBufferType = false;
+                        for (const auto& bufDef : m_Result.m_BufferDefs)
+                        {
+                            if (bufDef.m_Name == typeName.m_Text)
+                            {
+                                bIsCBufferType = true;
+                                break;
+                            }
+                        }
+
+                        if (!bIsCBufferType)
+                        {
+                            throw std::runtime_error(m_FilePath + ":" + std::to_string(typeLine) +
+                                                     ": srinput scope only allows cbuffer types or resource types; '" +
+                                                     typeName.m_Text + "' is not a cbuffer or known resource type");
+                        }
+
+                        Token memberName = Expect(TokKind::Ident, "member name in srinput");
+                        Expect(TokKind::Semicolon, ";");
+
+                        SrInputMember member;
+                        member.m_CBufferName = typeName.m_Text;
+                        member.m_MemberName  = memberName.m_Text;
+                        srInputDef.m_Members.push_back(std::move(member));
                     }
-
-                    Token memberName = Expect(TokKind::Ident, "member name in srinput");
-                    Expect(TokKind::Semicolon, ";");
-
-                    SrInputMember member;
-                    member.m_CBufferName = typeName.m_Text;
-                    member.m_MemberName  = memberName.m_Text;
-                    srInputDef.m_Members.push_back(std::move(member));
                 }
 
                 Expect(TokKind::RBrace, "}");

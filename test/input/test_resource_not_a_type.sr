@@ -1,0 +1,6 @@
+// ERROR TEST: completely unknown type name inside srinput — parser must throw.
+
+srinput BadInputs
+{
+    SomeCompletelyUnknownType myResource;
+};

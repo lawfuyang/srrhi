@@ -1,0 +1,6 @@
+// ERROR TEST: FeedbackTexture2D is not supported — parser must throw.
+
+srinput BadInputs
+{
+    FeedbackTexture2D<float4> feedbackTex;
+};

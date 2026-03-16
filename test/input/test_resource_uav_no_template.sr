@@ -1,0 +1,7 @@
+// ERROR TEST: RWTexture2D without <T> — UAV types require a template argument.
+// DXC would compile-error on this; our parser must throw.
+
+srinput BadInputs
+{
+    RWTexture2D outputTarget;
+};

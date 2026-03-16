@@ -1,0 +1,23 @@
+// Tests mixing cbuffers and resources in the same srinput block.
+// Also verifies that SRV/UAV register counters are independent per srinput scope.
+
+cbuffer FrameConsts
+{
+    float4x4 viewProj;
+    float    time;
+};
+
+srinput GBufferPass
+{
+    FrameConsts          m_Frame;
+    Texture2D<float4>    albedoTex;
+    Texture2D<float2>    normalTex;
+    RWTexture2D<float4>  outputTex;
+};
+
+srinput ShadowPass
+{
+    FrameConsts          m_Frame;
+    Texture2D<float>     shadowMap;
+    RWTexture2D<float4>  shadowOutput;
+};

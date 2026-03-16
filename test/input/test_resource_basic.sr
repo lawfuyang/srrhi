@@ -1,0 +1,12 @@
+// Basic resource test: SRV and UAV resources in an srinput block.
+// Expected output:
+//   Texture2D<float> BasePassInputs_DepthTexture : register(t0);
+//   Texture2D BasePassInputs_GBufferAlbedo : register(t1);
+//   RWStructuredBuffer<uint> BasePassInputs_DrawCount : register(u0);
+
+srinput BasePassInputs
+{
+    Texture2D<float> depthTexture;
+    Texture2D gBufferAlbedo;
+    RWStructuredBuffer<uint> drawCount;
+};

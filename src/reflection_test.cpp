@@ -51,6 +51,19 @@ static const std::unordered_set<std::string> k_ExpectedFailStems = {
     "test_packoffset",
     "test_pragma_pack",
     "test_srinput_invalid",
+    // Resource-related error tests
+    "test_resource_unsupported_texturebuffer",
+    "test_resource_unsupported_rwtexture2dms",
+    "test_resource_unsupported_append",
+    "test_resource_unsupported_consume",
+    "test_resource_unsupported_rov",
+    "test_resource_unsupported_feedback",
+    "test_resource_undefined_struct",
+    "test_resource_not_a_type",
+    "test_resource_uav_no_template",
+    "test_resource_buffer_no_template",
+    "test_resource_rwbuffer_no_template",
+    "test_resource_structuredbuffer_no_template",
 };
 
 // ---------------------------------------------------------------------------
@@ -515,18 +528,6 @@ int RunReflectionTests(const fs::path& testInputDir)
             continue;
         }
 
-        // ---- Skip files with no cbuffers -----------------------------------
-        bool hasCBuffers = false;
-        for (const auto& b : pr.m_Buffers)
-            if (b.m_bIsCBuffer) { hasCBuffers = true; break; }
-
-        if (!hasCBuffers)
-        {
-            LogMsg("[test]   SKIP  (no cbuffers defined)\n");
-            ++skipped;
-            continue;
-        }
-
         // ---- Compute layout ------------------------------------------------
         std::vector<LayoutMember> layouts;
         try
@@ -551,6 +552,15 @@ int RunReflectionTests(const fs::path& testInputDir)
         {
             LogMsg("[test]   FAIL  (HLSL gen error: %s)\n", e.what());
             ++failed;
+            continue;
+        }
+
+        // If there are no cbuffer layouts (e.g. resource-only srinput files),
+        // there is nothing to validate against DXC reflection — PASS immediately.
+        if (layouts.empty())
+        {
+            LogMsg("[test]   PASS  (no cbuffers to validate — parse+layout+hlslgen OK)\n");
+            ++passed;
             continue;
         }
 

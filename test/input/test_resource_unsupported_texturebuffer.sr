@@ -1,0 +1,6 @@
+// ERROR TEST: TextureBuffer<T> is not supported — parser must throw.
+
+srinput BadInputs
+{
+    TextureBuffer<float4> myBuf;
+};

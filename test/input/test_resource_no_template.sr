@@ -1,0 +1,14 @@
+// Tests SRV texture resources declared without a template type argument.
+// Per the HLSL spec, texture SRVs without <T> default to float4.
+// UAV types and Buffer/StructuredBuffer MUST have a template arg.
+
+srinput NoTemplateInputs
+{
+    Texture2D        albedo;
+    Texture3D        volume;
+    TextureCube      envMap;
+    Texture1D        tex1d;
+    Texture1DArray   tex1dArray;
+    Texture2DArray   tex2dArray;
+    TextureCubeArray texCubeArray;
+};

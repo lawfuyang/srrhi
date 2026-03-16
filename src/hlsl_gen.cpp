@@ -277,6 +277,26 @@ std::string GenerateHlsl(const ParseResult& pr,
         }
     }
 
+    // Emit per-srinput resource declarations (SRV/UAV globals with register bindings).
+    // SRV and UAV register counters are local to each srinput scope (reset per scope).
+    LogMsg("[hlsl_gen]   Emitting resource declarations...\n");
+    for (const auto& srInputDef : pr.m_SrInputDefs)
+    {
+        int srvReg = 0;
+        int uavReg = 0;
+        for (const auto& rm : srInputDef.m_Resources)
+        {
+            const std::string cleanedName = CleanMemberName(rm.m_MemberName);
+            const std::string globalVarName = srInputDef.m_Name + "_" + cleanedName;
+            bool bUAV = IsUAV(rm.m_Kind);
+            int regNum = bUAV ? uavReg++ : srvReg++;
+            out << rm.m_TypeName << " " << globalVarName
+                << " : register(" << (bUAV ? "u" : "t") << regNum << ");\n";
+        }
+        if (!srInputDef.m_Resources.empty())
+            out << "\n";
+    }
+
     // Emit per-srinput namespaces with getter functions
     for (const auto& srInputDef : pr.m_SrInputDefs)
     {
@@ -287,6 +307,16 @@ std::string GenerateHlsl(const ParseResult& pr,
             out << "    " << info.m_TypeName << " Get" << info.m_CleanedMemberName
                 << "() { return " << info.m_VarName << "; }\n";
         }
+
+        // Emit resource getter functions
+        for (const auto& rm : srInputDef.m_Resources)
+        {
+            const std::string cleanedName = CleanMemberName(rm.m_MemberName);
+            const std::string globalVarName = srInputDef.m_Name + "_" + cleanedName;
+            out << "    " << rm.m_TypeName << " Get" << cleanedName
+                << "() { return " << globalVarName << "; }\n";
+        }
+
         out << "}\n\n";
     }
 

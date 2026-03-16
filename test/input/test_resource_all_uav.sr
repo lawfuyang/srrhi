@@ -1,0 +1,13 @@
+// Tests all supported UAV resource types (u# registers).
+
+srinput AllUavInputs
+{
+    RWTexture1D<float4>      rwTex1d;
+    RWTexture1DArray<float4> rwTex1dArray;
+    RWTexture2D<float4>      rwTex2d;
+    RWTexture2DArray<float4> rwTex2dArray;
+    RWTexture3D<float4>      rwTex3d;
+    RWBuffer<float4>         rwTypedBuffer;
+    RWStructuredBuffer<uint> rwStructBuf;
+    RWByteAddressBuffer      rwRawBuf;
+};

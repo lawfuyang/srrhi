@@ -1,0 +1,7 @@
+// ERROR TEST: Buffer without <T> — typed buffer SRVs require a template argument.
+// DXC would compile-error on this; our parser must throw.
+
+srinput BadInputs
+{
+    Buffer myBuf;
+};

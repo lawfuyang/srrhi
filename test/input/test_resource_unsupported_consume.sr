@@ -1,0 +1,6 @@
+// ERROR TEST: ConsumeStructuredBuffer is not supported — parser must throw.
+
+srinput BadInputs
+{
+    ConsumeStructuredBuffer<uint> consumeBuf;
+};

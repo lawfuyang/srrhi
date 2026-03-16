@@ -1,0 +1,7 @@
+// ERROR TEST: RWTexture2DMS is not supported — UAVs do not support multisampling.
+// Parser must throw.
+
+srinput BadInputs
+{
+    RWTexture2DMS<float4> msTarget;
+};

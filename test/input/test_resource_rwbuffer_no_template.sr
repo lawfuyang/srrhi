@@ -1,0 +1,7 @@
+// ERROR TEST: RWBuffer without <T> — UAV typed buffer requires a template argument.
+// DXC would compile-error on this; our parser must throw.
+
+srinput BadInputs
+{
+    RWBuffer myBuf;
+};

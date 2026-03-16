@@ -1,0 +1,7 @@
+// ERROR TEST: StructuredBuffer<UndefinedStruct> — struct not visible at this scope.
+// Parser must throw.
+
+srinput BadInputs
+{
+    StructuredBuffer<UndefinedStruct> buf;
+};

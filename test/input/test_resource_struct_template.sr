@@ -1,0 +1,16 @@
+// Tests using a user-defined struct as the template argument for
+// StructuredBuffer<T> and RWStructuredBuffer<T>.
+
+struct DrawArgs
+{
+    uint indexCount;
+    uint instanceCount;
+    uint startIndex;
+    uint baseVertex;
+};
+
+srinput DrawIndirectInputs
+{
+    StructuredBuffer<DrawArgs>   drawArgsSrv;
+    RWStructuredBuffer<DrawArgs> drawArgsUav;
+};

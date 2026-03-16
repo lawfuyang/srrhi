@@ -1,0 +1,6 @@
+// ERROR TEST: RasterizerOrderedTexture2D (ROV) is not supported — parser must throw.
+
+srinput BadInputs
+{
+    RasterizerOrderedTexture2D<float4> rovTarget;
+};

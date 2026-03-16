@@ -1,0 +1,6 @@
+// ERROR TEST: AppendStructuredBuffer is not supported — parser must throw.
+
+srinput BadInputs
+{
+    AppendStructuredBuffer<uint> appendBuf;
+};

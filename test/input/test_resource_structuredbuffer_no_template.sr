@@ -1,0 +1,7 @@
+// ERROR TEST: StructuredBuffer without <T> — requires a template argument.
+// DXC would compile-error on this; our parser must throw.
+
+srinput BadInputs
+{
+    StructuredBuffer myBuf;
+};

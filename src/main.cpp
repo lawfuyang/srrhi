@@ -99,14 +99,6 @@ static void ProcessFile(const fs::path& srFile,
             std::string("Parse failed for '") + srFile.string() + "': " + e.what());
     }
 
-    bool bHasCBuffers = false;
-    for (auto& b : pr.m_Buffers) if (b.m_bIsCBuffer) { bHasCBuffers = true; break; }
-    if (!bHasCBuffers)
-    {
-        LogMsg("  No cbuffers found in '%s', skipping.\n", srFile.string().c_str());
-        return;
-    }
-
     // --- Compute layouts ---
     std::vector<LayoutMember> layouts;
     try

@@ -1,0 +1,18 @@
+// Tests all supported SRV resource types (t# registers).
+
+srinput AllSrvInputs
+{
+    Texture1D<float4>        tex1d;
+    Texture1DArray<float4>   tex1dArray;
+    Texture2D<float4>        tex2d;
+    Texture2DArray<float4>   tex2dArray;
+    Texture2DMS<float4>      tex2dms;
+    Texture2DMSArray<float4> tex2dmsArray;
+    Texture3D<float4>        tex3d;
+    TextureCube<float4>      texCube;
+    TextureCubeArray<float4> texCubeArray;
+    Buffer<float4>           typedBuffer;
+    StructuredBuffer<uint>   structBuf;
+    ByteAddressBuffer        rawBuf;
+    RaytracingAccelerationStructure accelStruct;
+};

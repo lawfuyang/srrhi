@@ -84,14 +84,75 @@ struct SrInputMember
 };
 
 // ---------------------------------------------------------------------------
-// SrInputDef: srinput scope containing cbuffer references
-//   m_Name  – name of the srinput scope
-//   m_Members – list of cbuffer references, order determines register assignment
+// ResourceKind: the category of an HLSL resource object.
+// ---------------------------------------------------------------------------
+enum class ResourceKind
+{
+    // SRV (t# registers) -------------------------------------------------------
+    Texture1D,
+    Texture1DArray,
+    Texture2D,
+    Texture2DArray,
+    Texture2DMS,
+    Texture2DMSArray,
+    Texture3D,
+    TextureCube,
+    TextureCubeArray,
+    Buffer,
+    StructuredBuffer,
+    ByteAddressBuffer,
+    RaytracingAccelerationStructure,
+
+    // UAV (u# registers) -------------------------------------------------------
+    RWTexture1D,
+    RWTexture1DArray,
+    RWTexture2D,
+    RWTexture2DArray,
+    RWTexture3D,
+    RWBuffer,
+    RWStructuredBuffer,
+    RWByteAddressBuffer,
+};
+
+// Returns true if the resource kind is a UAV (u# register), false for SRV (t#).
+inline bool IsUAV(ResourceKind k)
+{
+    return k == ResourceKind::RWTexture1D
+        || k == ResourceKind::RWTexture1DArray
+        || k == ResourceKind::RWTexture2D
+        || k == ResourceKind::RWTexture2DArray
+        || k == ResourceKind::RWTexture3D
+        || k == ResourceKind::RWBuffer
+        || k == ResourceKind::RWStructuredBuffer
+        || k == ResourceKind::RWByteAddressBuffer;
+}
+
+// ---------------------------------------------------------------------------
+// ResourceMember: a resource (SRV or UAV) declared inside an srinput block.
+//   m_Kind        – resource type enum
+//   m_TypeName    – full HLSL type string, e.g. "Texture2D<float4>"
+//   m_TemplateArg – template argument string, e.g. "float4" (empty if none)
+//   m_MemberName  – variable name declared in the srinput block
+// ---------------------------------------------------------------------------
+struct ResourceMember
+{
+    ResourceKind m_Kind;
+    std::string  m_TypeName;    // e.g. "Texture2D<float4>" or "ByteAddressBuffer"
+    std::string  m_TemplateArg; // e.g. "float4", "uint", "" for raw buffers
+    std::string  m_MemberName;
+};
+
+// ---------------------------------------------------------------------------
+// SrInputDef: srinput scope containing cbuffer references and resource members
+//   m_Name      – name of the srinput scope
+//   m_Members   – list of cbuffer references, order determines register assignment
+//   m_Resources – list of SRV/UAV resource members, order determines t#/u# assignment
 // ---------------------------------------------------------------------------
 struct SrInputDef
 {
-    std::string               m_Name;
+    std::string                m_Name;
     std::vector<SrInputMember> m_Members;
+    std::vector<ResourceMember> m_Resources;
 };
 
 // ---------------------------------------------------------------------------
