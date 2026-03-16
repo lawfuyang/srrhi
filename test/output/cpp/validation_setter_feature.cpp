@@ -48,8 +48,8 @@ namespace ConstantValidation
         "LightingInputs::LightRegisterIndex must be 1");
     static_assert(MaterialInputs::NumCBuffers == 1,
         "MaterialInputs::NumCBuffers must be 1");
-    static_assert(MaterialInputs::MaterialRegisterIndex == 2,
-        "MaterialInputs::MaterialRegisterIndex must be 2 (global register across all srinputs)");
+    static_assert(MaterialInputs::MaterialRegisterIndex == 0,
+        "MaterialInputs::MaterialRegisterIndex must be 0 (local register index, reset per srinput scope)");
 
     // test_setter_types.h: RendererInputs namespace
     static_assert(RendererInputs::NumCBuffers == 1,
@@ -72,8 +72,8 @@ namespace ConstantValidation
         "SceneInputs::CameraRegisterIndex must be 1");
     static_assert(ObjectInputs::NumCBuffers == 1,
         "ObjectInputs::NumCBuffers must be 1");
-    static_assert(ObjectInputs::ObjectRegisterIndex == 2,
-        "ObjectInputs::ObjectRegisterIndex must be 2 (global register)");
+    static_assert(ObjectInputs::ObjectRegisterIndex == 0,
+        "ObjectInputs::ObjectRegisterIndex must be 0 (local register index, reset per srinput scope)");
 
 } // namespace ConstantValidation
 
