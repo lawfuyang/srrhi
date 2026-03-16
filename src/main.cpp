@@ -20,17 +20,9 @@ std::string VisualizeLayoutsMachineReadable(const std::vector<LayoutMember>& lay
 int RunReflectionTests(const fs::path& testInputDir);
 
 // ---------------------------------------------------------------------------
-// Custom deleter for FILE*
+// Global flags
 // ---------------------------------------------------------------------------
-struct FileDeleter
-{
-    void operator()(FILE* f) const { if (f) fclose(f); }
-};
-
-// ---------------------------------------------------------------------------
-// Global output handles
-// ---------------------------------------------------------------------------
-static std::unique_ptr<FILE, FileDeleter> g_Vis; // visualizer_results.txt
+static bool g_Verbose = false; // -v or --test enables visualizer output to stdout
 
 void LogMsg(const char* fmt, ...)
 {
@@ -133,17 +125,17 @@ static void ProcessFile(const fs::path& srFile,
     {
         std::string vis      = VisualizeLayouts(layouts);
         std::string visMR    = VisualizeLayoutsMachineReadable(layouts);
-        if (g_Vis)
+        if (g_Verbose)
         {
-            fprintf(g_Vis.get(), "=== %s ===\n", srFile.string().c_str());
-            fwrite(vis.c_str(), 1, vis.size(), g_Vis.get());
+            printf("=== %s ===\n", srFile.string().c_str());
+            fwrite(vis.c_str(), 1, vis.size(), stdout);
             // Machine-readable section, clearly delimited
-            fprintf(g_Vis.get(), "--- machine-readable ---\n");
-            fwrite(visMR.c_str(), 1, visMR.size(), g_Vis.get());
-            fprintf(g_Vis.get(), "\n");
-            fflush(g_Vis.get());
+            printf("--- machine-readable ---\n");
+            fwrite(visMR.c_str(), 1, visMR.size(), stdout);
+            printf("\n");
+            fflush(stdout);
         }
-        LogMsg("  Visualizer: written %zu bytes for %s\n",
+        LogMsg("  Visualizer: %zu bytes for %s\n",
                vis.size(), srFile.filename().string().c_str());
     }
     catch (const std::exception& e)
@@ -209,32 +201,6 @@ static void ProcessFile(const fs::path& srFile,
 // ---------------------------------------------------------------------------
 int main(int argc, char* argv[])
 {
-    // Derive bin directory from argv[0] to place visualizer_results.txt beside the exe
-    fs::path binDir;
-    try
-    {
-        binDir = fs::absolute(fs::path(argv[0])).parent_path();
-    }
-    catch (...)
-    {
-        binDir = fs::current_path();
-    }
-
-    // Open visualizer results file (visualizer_results.txt in bin/)
-    {
-        fs::path visPath = binDir / "visualizer_results.txt";
-        g_Vis.reset(fopen(visPath.string().c_str(), "w"));
-        if (!g_Vis)
-        {
-            LogMsg("[srrhi] WARNING: Cannot open visualizer results file: %s — visualizer output will be skipped\n",
-                   (binDir / "visualizer_results.txt").string().c_str());
-        }
-        else
-        {
-            LogMsg("[srrhi] Visualizer results file: %s\n", visPath.string().c_str());
-        }
-    }
-
     LogMsg("[srrhi] Started.\n");
 
     // --- Parse arguments ---
@@ -255,17 +221,24 @@ int main(int argc, char* argv[])
             outputDir = argv[++i];
             LogMsg("[srrhi] Arg -o: %s\n", outputDir.c_str());
         }
+        else if (arg == "-v" || arg == "--verbose")
+        {
+            g_Verbose = true;
+            LogMsg("[srrhi] Arg %s: verbose mode enabled\n", arg.c_str());
+        }
         else if (arg == "--test")
         {
             runTests = true;
+            g_Verbose = true;
             LogMsg("[srrhi] Arg --test: reflection test mode enabled\n");
         }
         else if (arg == "--help" || arg == "-h")
         {
-            LogMsg("Usage: srrhi -i <input-dir> -o <output-dir> [--test]\n"
+            LogMsg("Usage: srrhi -i <input-dir> -o <output-dir> [-v] [--test]\n"
                    "  -i <dir>   Input folder (recursively scanned for .sr files)\n"
                    "  -o <dir>   Output folder (hlsl/ and cpp/ subfolders created)\n"
-                   "  --test     After generation, verify cbuffer layouts via DXC reflection\n");
+                   "  -v         Verbose: print visualizer output to stdout\n"
+                   "  --test     After generation, verify cbuffer layouts via DXC reflection (implies -v)\n");
             return 0;
         }
         else
