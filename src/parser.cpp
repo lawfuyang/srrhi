@@ -515,8 +515,24 @@ struct Parser
     {
         Expect(TokKind::LBrace, "{");
         std::vector<MemberVariable> members;
+        std::unordered_set<std::string> memberNames;
         while (!Check(TokKind::RBrace) && !Check(TokKind::Eof))
+        {
+            size_t prevCount = members.size();
             ParseMemberVariables(members);
+            // Check newly added members for duplicate names
+            for (size_t i = prevCount; i < members.size(); ++i)
+            {
+                const std::string& name = members[i].m_Name;
+                if (!memberNames.insert(name).second)
+                {
+                    LogMsg("[parser] ERROR: duplicate member name '%s' in struct at line %d\n",
+                           name.c_str(), m_Cur.m_Line);
+                    throw std::runtime_error(m_FilePath + ":" + std::to_string(m_Cur.m_Line) +
+                                             ": duplicate member name '" + name + "' in struct");
+                }
+            }
+        }
         Expect(TokKind::RBrace, "}");
         return members;
     }
@@ -698,6 +714,7 @@ struct Parser
 
                 SrInputDef srInputDef;
                 srInputDef.m_Name = srInputName.m_Text;
+                std::unordered_set<std::string> srInputMemberNames;
 
                 while (!Check(TokKind::RBrace) && !Check(TokKind::Eof))
                 {
@@ -826,6 +843,15 @@ struct Parser
                         Token memberName = Expect(TokKind::Ident, "member name in srinput");
                         Expect(TokKind::Semicolon, ";");
 
+                        if (!srInputMemberNames.insert(memberName.m_Text).second)
+                        {
+                            LogMsg("[parser] ERROR: duplicate member name '%s' in srinput '%s' at line %d\n",
+                                   memberName.m_Text.c_str(), srInputDef.m_Name.c_str(), memberName.m_Line);
+                            throw std::runtime_error(m_FilePath + ":" + std::to_string(memberName.m_Line) +
+                                                     ": duplicate member name '" + memberName.m_Text +
+                                                     "' in srinput '" + srInputDef.m_Name + "'");
+                        }
+
                         ResourceMember rm;
                         rm.m_Kind        = foundKind;
                         rm.m_TypeName    = fullTypeName;
@@ -855,6 +881,15 @@ struct Parser
 
                         Token memberName = Expect(TokKind::Ident, "member name in srinput");
                         Expect(TokKind::Semicolon, ";");
+
+                        if (!srInputMemberNames.insert(memberName.m_Text).second)
+                        {
+                            LogMsg("[parser] ERROR: duplicate member name '%s' in srinput '%s' at line %d\n",
+                                   memberName.m_Text.c_str(), srInputDef.m_Name.c_str(), memberName.m_Line);
+                            throw std::runtime_error(m_FilePath + ":" + std::to_string(memberName.m_Line) +
+                                                     ": duplicate member name '" + memberName.m_Text +
+                                                     "' in srinput '" + srInputDef.m_Name + "'");
+                        }
 
                         SrInputMember member;
                         member.m_CBufferName = typeName.m_Text;
