@@ -20,6 +20,46 @@ std::string VisualizeLayoutsMachineReadable(const std::vector<LayoutMember>& lay
 int RunReflectionTests(const fs::path& testInputDir);
 
 // ---------------------------------------------------------------------------
+// Global flags
+// ---------------------------------------------------------------------------
+static bool g_Verbose = false; // -v or --test enables visualizer output to stdout
+
+void LogMsg(const char* fmt, ...)
+{
+    va_list args;
+    va_start(args, fmt);
+    vprintf(fmt, args);
+    va_end(args);
+}
+
+// ---------------------------------------------------------------------------
+// Utility: write a string to a file, creating parent dirs as needed
+// ---------------------------------------------------------------------------
+static void WriteFile(const fs::path& path, const std::string& content)
+{
+    try
+    {
+        fs::create_directories(path.parent_path());
+    }
+    catch (const std::exception& e)
+    {
+        throw std::runtime_error("Cannot create directories for '" +
+                                 path.parent_path().string() + "': " + e.what());
+    }
+
+    FILE* f = fopen(path.string().c_str(), "w");
+    if (!f)
+        throw std::runtime_error("Cannot open file for writing: " + path.string());
+
+    bool bOk = (fwrite(content.c_str(), 1, content.size(), f) == content.size());
+    int closeErr = fclose(f);
+    if (!bOk)
+        throw std::runtime_error("Write error for file: " + path.string());
+    if (closeErr != 0)
+        throw std::runtime_error("Close error for file: " + path.string());
+}
+
+// ---------------------------------------------------------------------------
 // Generate minimal validation .cpp stubs for each generated .h file.
 // Each stub simply includes the header and compiles it.  All static_assert
 // register-index checks are emitted directly by the C++ code generator into
@@ -76,46 +116,6 @@ static int GenerateValidationStubs(const fs::path& headerDir)
 
     LogMsg("[srrhi] Generated %d validation stub(s).\n", count);
     return 0;
-}
-
-// ---------------------------------------------------------------------------
-// Global flags
-// ---------------------------------------------------------------------------
-static bool g_Verbose = false; // -v or --test enables visualizer output to stdout
-
-void LogMsg(const char* fmt, ...)
-{
-    va_list args;
-    va_start(args, fmt);
-    vprintf(fmt, args);
-    va_end(args);
-}
-
-// ---------------------------------------------------------------------------
-// Utility: write a string to a file, creating parent dirs as needed
-// ---------------------------------------------------------------------------
-static void WriteFile(const fs::path& path, const std::string& content)
-{
-    try
-    {
-        fs::create_directories(path.parent_path());
-    }
-    catch (const std::exception& e)
-    {
-        throw std::runtime_error("Cannot create directories for '" +
-                                 path.parent_path().string() + "': " + e.what());
-    }
-
-    FILE* f = fopen(path.string().c_str(), "w");
-    if (!f)
-        throw std::runtime_error("Cannot open file for writing: " + path.string());
-
-    bool bOk = (fwrite(content.c_str(), 1, content.size(), f) == content.size());
-    int closeErr = fclose(f);
-    if (!bOk)
-        throw std::runtime_error("Write error for file: " + path.string());
-    if (closeErr != 0)
-        throw std::runtime_error("Close error for file: " + path.string());
 }
 
 // ---------------------------------------------------------------------------

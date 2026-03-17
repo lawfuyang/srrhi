@@ -446,6 +446,12 @@ static void EmitClassCpp(std::ostringstream& out, const StructType& st,
         }
     }
 
+    if (bEmitValidation)
+    {
+        out << "\n    // Validation-only: returns raw cbuffer bytes for offset/value checks in tests.\n";
+        out << "    const uint8_t* GetRawBytes() const { return reinterpret_cast<const uint8_t*>(this); }\n";
+    }
+
     out << "};\n\n";
     if (bEmitValidation)
     {

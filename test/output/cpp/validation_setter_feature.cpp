@@ -3,6 +3,7 @@
 // It tests the new class-based cbuffer design with private members + public setters,
 // HLSL namespace getters, and per-srinput register index constants.
 
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -228,6 +229,165 @@ static bool TestMultiSrInputSetters()
 }
 
 // =============================================================================
+// RUNTIME TESTS: verify GetRawBytes() returns correct values at correct offsets
+// =============================================================================
+
+// Helper: read a T value from raw bytes at a given byte offset.
+template<typename T>
+static T ReadAt(const uint8_t* bytes, int offset)
+{
+    T val;
+    std::memcpy(&val, bytes + offset, sizeof(T));
+    return val;
+}
+
+// Verifies that SceneConstants setters write values at the correct byte offsets.
+// Offsets are validated by SceneConstantsValidator static_asserts in the header.
+static bool TestSceneSetterByteOffsets()
+{
+    SceneConstants sc;
+    const uint8_t* raw = sc.GetRawBytes();
+
+    // SetExposure writes a float at offset 268
+    sc.SetExposure(3.14f);
+    assert(ReadAt<float>(raw, 268) == 3.14f);
+
+    // SetFrameNumber writes a uint32_t at offset 304
+    sc.SetFrameNumber(0xDEADBEEFu);
+    assert(ReadAt<uint32_t>(raw, 304) == 0xDEADBEEFu);
+
+    // SetDeltaTime writes a float at offset 308
+    sc.SetDeltaTime(0.016f);
+    assert(ReadAt<float>(raw, 308) == 0.016f);
+
+    // SetCameraPosWS writes 3 floats at offset 256
+    DirectX::XMFLOAT3 pos = {1.0f, 2.0f, 3.0f};
+    sc.SetCameraPosWS(pos);
+    assert(ReadAt<float>(raw, 256) == 1.0f);
+    assert(ReadAt<float>(raw, 260) == 2.0f);
+    assert(ReadAt<float>(raw, 264) == 3.0f);
+
+    // SetFogParams writes 4 floats at offset 272
+    DirectX::XMFLOAT4 fog = {0.1f, 0.2f, 0.3f, 0.4f};
+    sc.SetFogParams(fog);
+    assert(ReadAt<float>(raw, 272) == 0.1f);
+    assert(ReadAt<float>(raw, 276) == 0.2f);
+    assert(ReadAt<float>(raw, 280) == 0.3f);
+    assert(ReadAt<float>(raw, 284) == 0.4f);
+
+    printf("  [PASS] SceneConstants setter byte offsets verified via GetRawBytes()\n");
+    return true;
+}
+
+// Verifies that FrameConsts/PassConsts setters write values at the correct byte offsets.
+static bool TestSrinputBasicSetterByteOffsets()
+{
+    FrameConsts fc;
+    const uint8_t* rawFc = fc.GetRawBytes();
+
+    // SetTime writes a float at offset 64
+    fc.SetTime(9.99f);
+    assert(ReadAt<float>(rawFc, 64) == 9.99f);
+
+    PassConsts pc;
+    const uint8_t* rawPc = pc.GetRawBytes();
+
+    // SetPassIdx writes a uint32_t at offset 0
+    pc.SetPassIdx(7u);
+    assert(ReadAt<uint32_t>(rawPc, 0) == 7u);
+
+    printf("  [PASS] FrameConsts/PassConsts setter byte offsets verified via GetRawBytes()\n");
+    return true;
+}
+
+// Verifies that TypedBuffer setters write values at the correct byte offsets.
+// Offsets are validated by TypedBufferValidator static_asserts in the header.
+static bool TestSetterTypesByteOffsets()
+{
+    TypedBuffer tb;
+    const uint8_t* raw = tb.GetRawBytes();
+
+    // SetScalarFloat at offset 0
+    tb.SetScalarFloat(2.71828f);
+    assert(ReadAt<float>(raw, 0) == 2.71828f);
+
+    // SetScalarUint at offset 4
+    tb.SetScalarUint(42u);
+    assert(ReadAt<uint32_t>(raw, 4) == 42u);
+
+    // SetVec3 at offset 16 (3 floats)
+    DirectX::XMFLOAT3 v3 = {10.0f, 20.0f, 30.0f};
+    tb.SetVec3(v3);
+    assert(ReadAt<float>(raw, 16) == 10.0f);
+    assert(ReadAt<float>(raw, 20) == 20.0f);
+    assert(ReadAt<float>(raw, 24) == 30.0f);
+
+    // SetVec4 at offset 32 (4 floats)
+    DirectX::XMFLOAT4 v4 = {1.0f, 2.0f, 3.0f, 4.0f};
+    tb.SetVec4(v4);
+    assert(ReadAt<float>(raw, 32) == 1.0f);
+    assert(ReadAt<float>(raw, 36) == 2.0f);
+    assert(ReadAt<float>(raw, 40) == 3.0f);
+    assert(ReadAt<float>(raw, 44) == 4.0f);
+
+    // SetIvec2 at offset 112 (2 int32_t)
+    DirectX::XMINT2 iv2 = {-5, 99};
+    tb.SetIvec2(iv2);
+    assert(ReadAt<int32_t>(raw, 112) == -5);
+    assert(ReadAt<int32_t>(raw, 116) == 99);
+
+    printf("  [PASS] TypedBuffer setter byte offsets verified via GetRawBytes()\n");
+    return true;
+}
+
+// Verifies that PrefixBuffer setters write values at the correct byte offsets.
+static bool TestPrefixStrippingByteOffsets()
+{
+    PrefixBuffer pb;
+    const uint8_t* raw = pb.GetRawBytes();
+
+    // SetPrefixedFloat at offset 0
+    pb.SetPrefixedFloat(1.5f);
+    assert(ReadAt<float>(raw, 0) == 1.5f);
+
+    // SetStaticCount at offset 16 (after float + padding to vec4 boundary)
+    pb.SetStaticCount(99u);
+    assert(ReadAt<uint32_t>(raw, 16) == 99u);
+
+    printf("  [PASS] PrefixBuffer setter byte offsets verified via GetRawBytes()\n");
+    return true;
+}
+
+// Verifies that PerFrameData/PerCameraData/PerObjectData setters write at correct offsets.
+static bool TestMultiSrInputSetterByteOffsets()
+{
+    PerFrameData pfd;
+    const uint8_t* rawPfd = pfd.GetRawBytes();
+
+    // SetTime at offset 0
+    pfd.SetTime(5.0f);
+    assert(ReadAt<float>(rawPfd, 0) == 5.0f);
+
+    // SetDeltaTime at offset 4
+    pfd.SetDeltaTime(0.033f);
+    assert(ReadAt<float>(rawPfd, 4) == 0.033f);
+
+    // SetFrameIndex at offset 8
+    pfd.SetFrameIndex(255u);
+    assert(ReadAt<uint32_t>(rawPfd, 8) == 255u);
+
+    PerObjectData pod;
+    const uint8_t* rawPod = pod.GetRawBytes();
+
+    // SetRoughness: after a float4x4 (64 bytes) and float3 (12 bytes) = offset 76
+    pod.SetRoughness(0.75f);
+    assert(ReadAt<float>(rawPod, 76) == 0.75f);
+
+    printf("  [PASS] Multi-srinput setter byte offsets verified via GetRawBytes()\n");
+    return true;
+}
+
+// =============================================================================
 // INTENTIONAL COMPILE-ERROR DEMONSTRATIONS (wrapped in #if 0 - do NOT enable)
 // =============================================================================
 // These blocks show what would fail to compile, proving that members are private.
@@ -292,6 +452,14 @@ int main()
     TestSetterTypes();
     TestPrefixStripping();
     TestMultiSrInputSetters();
+    printf("\n");
+
+    printf("--- Setter Byte-Offset Validation (via GetRawBytes()) ---\n");
+    TestSceneSetterByteOffsets();
+    TestSrinputBasicSetterByteOffsets();
+    TestSetterTypesByteOffsets();
+    TestPrefixStrippingByteOffsets();
+    TestMultiSrInputSetterByteOffsets();
     printf("\n");
 
     printf("=== All setter/getter tests PASSED ===\n");
