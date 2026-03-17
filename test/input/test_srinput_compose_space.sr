@@ -1,0 +1,27 @@
+// Positive test: composed srinput with a register space on the outer parent.
+// The space attribute applies to ALL flattened resources from both the nested
+// and the parent srinput (inner space, if any, is ignored for the final output).
+
+cbuffer InnerConsts
+{
+    float m_InnerVal;
+};
+
+cbuffer OuterConsts
+{
+    float m_OuterVal;
+};
+
+srinput InnerPass
+{
+    InnerConsts       m_Inner;
+    Texture2D<float4> m_InnerTex;
+};
+
+[space(2)]
+srinput OuterPass
+{
+    InnerPass         m_InnerRef;
+    OuterConsts       m_Outer;
+    Texture2D<float4> m_OuterTex;
+};

@@ -1,5 +1,6 @@
 ﻿#include "types.h"
 #include "common.h"
+#include "flatten.h"
 #include <sstream>
 #include <stdexcept>
 #include <unordered_set>
@@ -549,12 +550,13 @@ std::string GenerateCpp(const ParseResult& pr,
         out << "#include <cstring>\n";
 
     // Include srrhi.h for ResourceEntry and ResourceType (resource binding API).
-    // Needed when any srinput has cbuffer references, SRV/UAV resources, or samplers.
+    // Needed when any srinput (including via composition) has cbuffer refs, SRV/UAV resources, or samplers.
     {
         bool bNeedsResourceEntries = false;
         for (const auto& srInputDef : pr.m_SrInputDefs)
         {
-            if (!srInputDef.m_Members.empty() || !srInputDef.m_Resources.empty() || !srInputDef.m_Samplers.empty())
+            FlatSrInput flat = FlattenSrInput(srInputDef, pr.m_SrInputDefs);
+            if (!flat.m_Members.empty() || !flat.m_Resources.empty() || !flat.m_Samplers.empty())
             {
                 bNeedsResourceEntries = true;
                 break;
@@ -574,11 +576,14 @@ std::string GenerateCpp(const ParseResult& pr,
         EmitStructCpp(out, st, localPadCount);
     }
 
-    // Build a set of cbuffer names that are in srinput scopes
+    // Build a set of cbuffer names that are in srinput scopes (including transitive composition)
     std::unordered_set<std::string> cbuffersInSrInput;
     for (const auto& srInputDef : pr.m_SrInputDefs)
-        for (const auto& member : srInputDef.m_Members)
+    {
+        FlatSrInput flat = FlattenSrInput(srInputDef, pr.m_SrInputDefs);
+        for (const auto& member : flat.m_Members)
             cbuffersInSrInput.insert(member.m_CBufferName);
+    }
 
     // Emit cbuffer structs as classes with private members + public setters
     // (only for those referenced in srinput scopes)
@@ -606,17 +611,20 @@ std::string GenerateCpp(const ParseResult& pr,
 
     // Emit per-srinput classes with NumCBuffers/NumSRVs/NumUAVs/NumSamplers + per-resource register index constants.
     // CBuffer, SRV, UAV, and sampler register numbers are all local to each srinput scope (reset per scope).
+    // Composition: the flattened view is used so nested srinput resources are inlined with unique register indices.
     for (const auto& srInputDef : pr.m_SrInputDefs)
     {
-        // Count SRVs and UAVs for this srinput scope
+        FlatSrInput flat = FlattenSrInput(srInputDef, pr.m_SrInputDefs);
+
+        // Count SRVs and UAVs for this (flattened) srinput scope
         uint32_t numSRVs = 0;
         uint32_t numUAVs = 0;
-        for (const auto& rm : srInputDef.m_Resources)
+        for (const auto& rm : flat.m_Resources)
         {
             if (IsUAV(rm.m_Kind)) ++numUAVs;
             else                  ++numSRVs;
         }
-        uint32_t numSamplers = static_cast<uint32_t>(srInputDef.m_Samplers.size());
+        uint32_t numSamplers = static_cast<uint32_t>(flat.m_Samplers.size());
 
         out << "struct " << srInputDef.m_Name << "\n{\n";
 
@@ -624,10 +632,10 @@ std::string GenerateCpp(const ParseResult& pr,
         // All cbuffers (push constant or regular) use a sequential counter starting at 0.
         // Push constants must be declared first in the srinput, so they always land on b0.
         out << "    static constexpr uint32_t NumCBuffers = "
-            << srInputDef.m_Members.size() << ";\n";
+            << flat.m_Members.size() << ";\n";
         {
             uint32_t cbufReg = 0;
-            for (const auto& member : srInputDef.m_Members)
+            for (const auto& member : flat.m_Members)
             {
                 const std::string constName = CleanMemberName(member.m_MemberName) + "RegisterIndex";
                 out << "    static constexpr uint32_t " << constName << " = "
@@ -642,7 +650,7 @@ std::string GenerateCpp(const ParseResult& pr,
         out << "    static constexpr uint32_t NumSRVs = " << numSRVs << ";\n";
         {
             uint32_t srvReg = 0;
-            for (const auto& rm : srInputDef.m_Resources)
+            for (const auto& rm : flat.m_Resources)
             {
                 if (!IsUAV(rm.m_Kind))
                 {
@@ -657,7 +665,7 @@ std::string GenerateCpp(const ParseResult& pr,
         out << "    static constexpr uint32_t NumUAVs = " << numUAVs << ";\n";
         {
             uint32_t uavReg = 0;
-            for (const auto& rm : srInputDef.m_Resources)
+            for (const auto& rm : flat.m_Resources)
             {
                 if (IsUAV(rm.m_Kind))
                 {
@@ -672,7 +680,7 @@ std::string GenerateCpp(const ParseResult& pr,
         out << "    static constexpr uint32_t NumSamplers = " << numSamplers << ";\n";
         {
             uint32_t samplerReg = 0;
-            for (const auto& sm : srInputDef.m_Samplers)
+            for (const auto& sm : flat.m_Samplers)
             {
                 const std::string constName = CleanMemberName(sm.m_MemberName) + "RegisterIndex";
                 out << "    static constexpr uint32_t " << constName << " = "
@@ -680,8 +688,8 @@ std::string GenerateCpp(const ParseResult& pr,
             }
         }
 
-        // Scalar constants declared in the srinput block
-        for (const auto& sc : srInputDef.m_ScalarConsts)
+        // Scalar constants declared in this srinput (including from nested srinputs via composition)
+        for (const auto& sc : flat.m_ScalarConsts)
         {
             // Map HLSL scalar type to C++ type for constexpr
             std::string cppType = sc.m_TypeName;
@@ -700,18 +708,18 @@ std::string GenerateCpp(const ParseResult& pr,
         }
 
         // Total resource count: CBuffers + SRVs + UAVs + Samplers
-        const uint32_t numCBuffers = static_cast<uint32_t>(srInputDef.m_Members.size());
+        const uint32_t numCBuffers = static_cast<uint32_t>(flat.m_Members.size());
         const uint32_t numResources = numCBuffers + numSRVs + numUAVs + numSamplers;
         out << "    static constexpr uint32_t NumResources = NumCBuffers + NumSRVs + NumUAVs + NumSamplers;\n";
 
-        // Register space
+        // Register space: always taken from the top-level srinput (not nested srinputs)
         out << "    static constexpr uint32_t RegisterSpace = " << std::max(0, srInputDef.m_RegisterSpace) << ";\n";
 
-        // Compose cbuffer structs directly as member variables
-        if (!srInputDef.m_Members.empty())
+        // Compose cbuffer structs directly as member variables (inlined from nested srinputs too)
+        if (!flat.m_Members.empty())
         {
             out << "\n";
-            for (const auto& member : srInputDef.m_Members)
+            for (const auto& member : flat.m_Members)
             {
                 out << "    " << member.m_CBufferName << " " << member.m_MemberName << ";\n";
             }
@@ -727,10 +735,10 @@ std::string GenerateCpp(const ParseResult& pr,
             out << "    srrhi::ResourceEntry m_Resources[NumResources] = {\n";
 
             // -- CBuffer entries --
-            if (!srInputDef.m_Members.empty())
+            if (!flat.m_Members.empty())
             {
                 out << "        // ConstantBuffers (b# registers)\n";
-                for (const auto& member : srInputDef.m_Members)
+                for (const auto& member : flat.m_Members)
                 {
                     const std::string constName = CleanMemberName(member.m_MemberName) + "RegisterIndex";
                     const std::string resType = member.m_bIsPushConstant
@@ -743,7 +751,7 @@ std::string GenerateCpp(const ParseResult& pr,
 
             // -- SRV entries --
             bool firstSrv = true;
-            for (const auto& rm : srInputDef.m_Resources)
+            for (const auto& rm : flat.m_Resources)
             {
                 if (!IsUAV(rm.m_Kind))
                 {
@@ -756,7 +764,7 @@ std::string GenerateCpp(const ParseResult& pr,
 
             // -- UAV entries --
             bool firstUav = true;
-            for (const auto& rm : srInputDef.m_Resources)
+            for (const auto& rm : flat.m_Resources)
             {
                 if (IsUAV(rm.m_Kind))
                 {
@@ -768,10 +776,10 @@ std::string GenerateCpp(const ParseResult& pr,
             }
 
             // -- Sampler entries --
-            if (!srInputDef.m_Samplers.empty())
+            if (!flat.m_Samplers.empty())
             {
                 out << "        // Samplers (s# registers)\n";
-                for (const auto& sm : srInputDef.m_Samplers)
+                for (const auto& sm : flat.m_Samplers)
                 {
                     const std::string constName = CleanMemberName(sm.m_MemberName) + "RegisterIndex";
                     out << "        { nullptr, " << constName
@@ -786,7 +794,7 @@ std::string GenerateCpp(const ParseResult& pr,
             uint32_t resourceIdx = 0;
 
             // CBuffer setters: simple void* overload only
-            for (const auto& member : srInputDef.m_Members)
+            for (const auto& member : flat.m_Members)
             {
                 const std::string setterName = "Set" + CleanMemberName(member.m_MemberName);
                 if (member.m_bIsPushConstant)
@@ -806,7 +814,7 @@ std::string GenerateCpp(const ParseResult& pr,
             }
 
             // SRV setters
-            for (const auto& rm : srInputDef.m_Resources)
+            for (const auto& rm : flat.m_Resources)
             {
                 if (!IsUAV(rm.m_Kind))
                 {
@@ -820,8 +828,6 @@ std::string GenerateCpp(const ParseResult& pr,
                         if (IsArrayTextureKind(rm.m_Kind))
                         {
                             // Array Texture_SRV: full 5-param overload for mip + array-slice control.
-                            // '-1' for numMipLevels means \"all mip levels from baseMipLevel\".
-                            // '-1' for numArraySlices means \"all slices from baseArraySlice\".
                             out << "    void " << setterName
                                 << "(void* pResource, int32_t baseMipLevel, int32_t numMipLevels,"
                                    " int32_t baseArraySlice, int32_t numArraySlices)\n    {\n";
@@ -835,7 +841,6 @@ std::string GenerateCpp(const ParseResult& pr,
                         else
                         {
                             // Non-array Texture_SRV: 3-param overload for mip-range control.
-                            // '-1' for numMipLevels means \"all mip levels from baseMipLevel\".
                             out << "    void " << setterName
                                 << "(void* pResource, int32_t baseMipLevel, int32_t numMipLevels)\n    {\n";
                             out << "        m_Resources[" << resourceIdx << "].pResource    = pResource;\n";
@@ -855,18 +860,16 @@ std::string GenerateCpp(const ParseResult& pr,
             }
 
             // UAV setters
-            for (const auto& rm : srInputDef.m_Resources)
+            for (const auto& rm : flat.m_Resources)
             {
                 if (IsUAV(rm.m_Kind))
                 {
                     const std::string setterName = "Set" + CleanMemberName(rm.m_MemberName);
                     if (IsTextureKind(rm.m_Kind))
                     {
-                        // numMipLevels is always hardcoded to 1 — a UAV can only bind a single mip at a time.
                         if (IsArrayTextureKind(rm.m_Kind))
                         {
                             // Array Texture_UAV: 4-param overload (baseMip + array-slice control).
-                            // '-1' for numArraySlices means \"all slices from baseArraySlice\".
                             out << "    void " << setterName
                                 << "(void* pResource, int32_t baseMipLevel,"
                                    " int32_t baseArraySlice, int32_t numArraySlices)\n    {\n";
@@ -899,7 +902,7 @@ std::string GenerateCpp(const ParseResult& pr,
             }
 
             // Sampler setters: simple void* overload only
-            for (const auto& sm : srInputDef.m_Samplers)
+            for (const auto& sm : flat.m_Samplers)
             {
                 const std::string setterName = "Set" + CleanMemberName(sm.m_MemberName);
                 out << "    void " << setterName << "(void* pResource)"
@@ -913,14 +916,13 @@ std::string GenerateCpp(const ParseResult& pr,
         if (bEmitValidation)
         {
             // Emit static_assert checks so the values are verified at compile time.
-            // These live in the generated header itself — no external tooling needed.
             out << "// Compile-time register index checks for " << srInputDef.m_Name << "\n";
 
             out << "static_assert(" << srInputDef.m_Name << "::NumCBuffers == "
-                << srInputDef.m_Members.size() << "u);\n";
+                << flat.m_Members.size() << "u);\n";
             {
                 uint32_t cbufReg = 0;
-                for (const auto& member : srInputDef.m_Members)
+                for (const auto& member : flat.m_Members)
                 {
                     const std::string constName = CleanMemberName(member.m_MemberName) + "RegisterIndex";
                     out << "static_assert(" << srInputDef.m_Name << "::" << constName
@@ -933,7 +935,7 @@ std::string GenerateCpp(const ParseResult& pr,
             out << "static_assert(" << srInputDef.m_Name << "::NumSRVs == " << numSRVs << "u);\n";
             {
                 uint32_t srvReg = 0;
-                for (const auto& rm : srInputDef.m_Resources)
+                for (const auto& rm : flat.m_Resources)
                 {
                     if (!IsUAV(rm.m_Kind))
                     {
@@ -947,7 +949,7 @@ std::string GenerateCpp(const ParseResult& pr,
             out << "static_assert(" << srInputDef.m_Name << "::NumUAVs == " << numUAVs << "u);\n";
             {
                 uint32_t uavReg = 0;
-                for (const auto& rm : srInputDef.m_Resources)
+                for (const auto& rm : flat.m_Resources)
                 {
                     if (IsUAV(rm.m_Kind))
                     {
@@ -961,7 +963,7 @@ std::string GenerateCpp(const ParseResult& pr,
             out << "static_assert(" << srInputDef.m_Name << "::NumSamplers == " << numSamplers << "u);\n";
             {
                 uint32_t samplerReg = 0;
-                for (const auto& sm : srInputDef.m_Samplers)
+                for (const auto& sm : flat.m_Samplers)
                 {
                     const std::string constName = CleanMemberName(sm.m_MemberName) + "RegisterIndex";
                     out << "static_assert(" << srInputDef.m_Name << "::" << constName
@@ -971,12 +973,10 @@ std::string GenerateCpp(const ParseResult& pr,
 
             out << "static_assert(" << srInputDef.m_Name << "::NumResources == "
                 << numResources << "u);\n";
-
             out << "static_assert(" << srInputDef.m_Name << "::RegisterSpace == "
                 << std::max(0, srInputDef.m_RegisterSpace) << "u);\n";
-        }  // if (bEmitValidation)
-
-        out << "\n";
+            out << "\n";
+        }
     }
 
     out << "\n}  // namespace srrhi\n";

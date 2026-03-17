@@ -1,0 +1,25 @@
+// Positive test: parent srinput has [push_constant] and also nests another srinput
+// that has no push constant. Total push constants in flattened view = 1, which is allowed.
+
+cbuffer PushData
+{
+    float m_Val;
+};
+
+cbuffer BaseConsts
+{
+    float m_Data;
+};
+
+srinput BaseInputs
+{
+    BaseConsts m_Base;
+};
+
+srinput GoodParent
+{
+    [push_constant]
+    PushData   m_Push;
+
+    BaseInputs m_Nested;  // OK: total push constants in flat view = 1
+};

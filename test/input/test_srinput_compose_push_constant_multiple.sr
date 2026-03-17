@@ -1,0 +1,27 @@
+// EXPECTED TO FAIL: both the nested srinput and the parent srinput declare a
+// [push_constant] member. After flattening, the combined srinput has 2 push
+// constants, but only 1 is allowed.
+
+cbuffer NestedPush
+{
+    float m_NestedVal;
+};
+
+cbuffer ParentPush
+{
+    float m_ParentVal;
+};
+
+srinput NestedInputs
+{
+    [push_constant]
+    NestedPush m_NestedPush;
+};
+
+srinput BadComposed
+{
+    NestedInputs m_Nested;   // brings in 1 push constant from NestedInputs
+
+    [push_constant]
+    ParentPush m_ParentPush; // ERROR: flat view now has 2 push constants
+};

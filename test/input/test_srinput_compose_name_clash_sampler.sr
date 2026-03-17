@@ -1,0 +1,14 @@
+// EXPECTED TO FAIL: flattened sampler name clash.
+// BaseInputs has sampler 'm_LinearSampler'; parent also tries to declare 'm_LinearSampler'.
+
+srinput BaseInputs
+{
+    Texture2D<float4>  m_Albedo;
+    SamplerState       m_LinearSampler;
+};
+
+srinput ExtendedPass
+{
+    BaseInputs         m_Base;
+    SamplerState       m_LinearSampler;  // ERROR: 'm_LinearSampler' clashes with BaseInputs sampler
+};

@@ -1,5 +1,6 @@
 ﻿#include "types.h"
 #include "common.h"
+#include "flatten.h"
 #include <sstream>
 #include <stdexcept>
 #include <cctype>
@@ -200,11 +201,14 @@ std::string GenerateHlsl(const ParseResult& pr,
         EmitStructHlsl(out, st, localPadCount, 0, nullptr);
     }
 
-    // Build a set of cbuffer names that are in srinput scopes
+    // Build a set of cbuffer names that are in srinput scopes (including transitive nested srinputs)
     std::unordered_set<std::string> cbuffersInSrInput;
     for (const auto& srInputDef : pr.m_SrInputDefs)
-        for (const auto& member : srInputDef.m_Members)
+    {
+        FlatSrInput flat = FlattenSrInput(srInputDef, pr.m_SrInputDefs);
+        for (const auto& member : flat.m_Members)
             cbuffersInSrInput.insert(member.m_CBufferName);
+    }
 
     // Emit cbuffer definitions as structs (only for those in srinput scopes)
     LogMsg("[hlsl_gen]   Emitting %zu cbuffer definition(s) as struct(s)...\n",
@@ -225,24 +229,14 @@ std::string GenerateHlsl(const ParseResult& pr,
 
     // Emit cbuffers that are in srinput scopes.
     // Register numbers are local to each srinput scope (reset per srinput).
-    // All register types (b, t, u, s) are unique within an srinput scope only.
-    // Track per-srinput cbuffer info for namespace getter emission.
-    struct CbufInfo
-    {
-        std::string m_SrInputName;
-        std::string m_CleanedMemberName; // e.g. "Scene", "FrameConsts"
-        std::string m_VarName;           // e.g. "MainInputs_Scene"
-        std::string m_TypeName;          // e.g. "SceneConstants"
-    };
-    std::vector<CbufInfo> allCbufInfos;
-
+    // Composition: flatten the srinput hierarchy so registers are assigned uniquely.
+    // Space is always taken from the top-level parent srinput.
     LogMsg("[hlsl_gen]   Emitting cbuffers with register bindings...\n");
-    // All srinputs share space0 — only one srinput is active per shader dispatch,
-    // so register numbers are assigned per-srinput (reset each scope) within space0.
     for (const auto& srInputDef : pr.m_SrInputDefs)
     {
-        int regNum = 0;  // b# counter: local to this srinput scope, advances for every cbuffer
-        for (const auto& member : srInputDef.m_Members)
+        FlatSrInput flat = FlattenSrInput(srInputDef, pr.m_SrInputDefs);
+        int regNum = 0;  // b# counter: local to this srinput scope, resets per srinput
+        for (const auto& member : flat.m_Members)
         {
             const std::string cleanedMemberName = CleanMemberName(member.m_MemberName);
             const std::string varName = srInputDef.m_Name + "_" + cleanedMemberName;
@@ -273,12 +267,10 @@ std::string GenerateHlsl(const ParseResult& pr,
                 if (correspondingLayout)
                 {
                     int localPadCount = 0;
+                    // Space is always from the top-level parent srinput (not the nested one)
                     EmitWrappedCBufferHlsl(out, *bufDef, *correspondingLayout,
                                           regNum, varName, srInputDef.m_RegisterSpace, localPadCount);
                 }
-
-                allCbufInfos.push_back({srInputDef.m_Name, cleanedMemberName,
-                                        varName, member.m_CBufferName});
             }
 
             // Always advance — push constants occupy b0 and advance to b1, etc.
@@ -288,12 +280,14 @@ std::string GenerateHlsl(const ParseResult& pr,
 
     // Emit per-srinput resource declarations (SRV/UAV globals with register bindings).
     // SRV and UAV register counters are local to each srinput scope (reset per scope).
+    // Composition: use flattened view; space is always from the top-level parent.
     LogMsg("[hlsl_gen]   Emitting resource declarations...\n");
     for (const auto& srInputDef : pr.m_SrInputDefs)
     {
+        FlatSrInput flat = FlattenSrInput(srInputDef, pr.m_SrInputDefs);
         int srvReg = 0;
         int uavReg = 0;
-        for (const auto& rm : srInputDef.m_Resources)
+        for (const auto& rm : flat.m_Resources)
         {
             const std::string cleanedName = CleanMemberName(rm.m_MemberName);
             const std::string globalVarName = srInputDef.m_Name + "_" + cleanedName;
@@ -305,7 +299,7 @@ std::string GenerateHlsl(const ParseResult& pr,
                 out << ", space" << srInputDef.m_RegisterSpace;
             out << ");\n";
         }
-        if (!srInputDef.m_Resources.empty())
+        if (!flat.m_Resources.empty())
             out << "\n";
     }
 
@@ -313,8 +307,9 @@ std::string GenerateHlsl(const ParseResult& pr,
     LogMsg("[hlsl_gen]   Emitting sampler declarations...\n");
     for (const auto& srInputDef : pr.m_SrInputDefs)
     {
+        FlatSrInput flat = FlattenSrInput(srInputDef, pr.m_SrInputDefs);
         int samplerReg = 0;
-        for (const auto& sm : srInputDef.m_Samplers)
+        for (const auto& sm : flat.m_Samplers)
         {
             const std::string cleanedName = CleanMemberName(sm.m_MemberName);
             const std::string globalVarName = srInputDef.m_Name + "_" + cleanedName;
@@ -324,23 +319,29 @@ std::string GenerateHlsl(const ParseResult& pr,
                 out << ", space" << srInputDef.m_RegisterSpace;
             out << ");\n";
         }
-        if (!srInputDef.m_Samplers.empty())
+        if (!flat.m_Samplers.empty())
             out << "\n";
     }
 
-    // Emit per-srinput namespaces with getter functions
+    // Emit per-srinput namespaces with getter functions.
+    // For composed srinputs, flattened members/resources/samplers/consts all land
+    // in the top-level parent's namespace under the parent's global variable names.
     for (const auto& srInputDef : pr.m_SrInputDefs)
     {
+        FlatSrInput flat = FlattenSrInput(srInputDef, pr.m_SrInputDefs);
         out << "namespace " << srInputDef.m_Name << "\n{\n";
-        for (const auto& info : allCbufInfos)
+
+        // Cbuffer getters
+        for (const auto& member : flat.m_Members)
         {
-            if (info.m_SrInputName != srInputDef.m_Name) continue;
-            out << "    " << info.m_TypeName << " Get" << info.m_CleanedMemberName
-                << "() { return " << info.m_VarName << "; }\n";
+            const std::string cleanedName = CleanMemberName(member.m_MemberName);
+            const std::string varName = srInputDef.m_Name + "_" + cleanedName;
+            out << "    " << member.m_CBufferName << " Get" << cleanedName
+                << "() { return " << varName << "; }\n";
         }
 
-        // Emit resource getter functions
-        for (const auto& rm : srInputDef.m_Resources)
+        // Resource getter functions
+        for (const auto& rm : flat.m_Resources)
         {
             const std::string cleanedName = CleanMemberName(rm.m_MemberName);
             const std::string globalVarName = srInputDef.m_Name + "_" + cleanedName;
@@ -348,8 +349,8 @@ std::string GenerateHlsl(const ParseResult& pr,
                 << "() { return " << globalVarName << "; }\n";
         }
 
-        // Emit sampler getter functions
-        for (const auto& sm : srInputDef.m_Samplers)
+        // Sampler getter functions
+        for (const auto& sm : flat.m_Samplers)
         {
             const std::string cleanedName = CleanMemberName(sm.m_MemberName);
             const std::string globalVarName = srInputDef.m_Name + "_" + cleanedName;
@@ -357,12 +358,12 @@ std::string GenerateHlsl(const ParseResult& pr,
                 << "() { return " << globalVarName << "; }\n";
         }
 
-        // Emit scalar constants as static const declarations
-        for (const auto& sc : srInputDef.m_ScalarConsts)
+        // Scalar constants as static const declarations
+        for (const auto& sc : flat.m_ScalarConsts)
         {
             // Map C-style type aliases to canonical HLSL type names
             std::string hlslType = sc.m_TypeName;
-            if (hlslType == "int32_t")   hlslType = "int";
+            if (hlslType == "int32_t")        hlslType = "int";
             else if (hlslType == "uint32_t")  hlslType = "uint";
             else if (hlslType == "float32_t") hlslType = "float";
             else if (hlslType == "float64_t") hlslType = "double";

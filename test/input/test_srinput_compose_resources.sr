@@ -1,0 +1,16 @@
+// Positive test: srinput composition with SRV and UAV resources.
+// The flattened ExtendedPass should have: t0, t1 from BaseInputs; t2 from ExtendedPass.
+// UAVs: u0 from ExtendedPass.
+
+srinput BaseInputs
+{
+    Texture2D<float4>           m_Albedo;
+    Texture2D<float>            m_Depth;
+};
+
+srinput ExtendedPass
+{
+    BaseInputs                  m_Base;
+    Texture2D<float4>           m_Normal;
+    RWTexture2D<float4>         m_Output;
+};

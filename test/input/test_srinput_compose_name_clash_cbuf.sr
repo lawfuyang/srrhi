@@ -1,0 +1,23 @@
+// EXPECTED TO FAIL: flattened cbuffer member name clash.
+// BaseInputs has 'm_Frame'; ExtendedPass also declares 'm_Frame' -- name clash.
+
+cbuffer FrameConsts
+{
+    float4x4 m_ViewProj;
+};
+
+cbuffer OtherFrameConsts
+{
+    float m_Extra;
+};
+
+srinput BaseInputs
+{
+    FrameConsts m_Frame;
+};
+
+srinput ExtendedPass
+{
+    BaseInputs      m_Base;
+    OtherFrameConsts m_Frame;  // ERROR: 'm_Frame' clashes with flattened BaseInputs name
+};

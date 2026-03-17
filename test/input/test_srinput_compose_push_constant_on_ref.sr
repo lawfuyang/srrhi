@@ -1,0 +1,18 @@
+// EXPECTED TO FAIL: [push_constant] applied to a nested srinput reference.
+// [push_constant] is only valid on cbuffer members, not srinput refs.
+
+cbuffer BaseConsts
+{
+    float m_Data;
+};
+
+srinput BaseInputs
+{
+    BaseConsts m_Base;
+};
+
+srinput BadParent
+{
+    [push_constant]
+    BaseInputs m_Nested;  // ERROR: [push_constant] cannot be on a nested srinput ref
+};

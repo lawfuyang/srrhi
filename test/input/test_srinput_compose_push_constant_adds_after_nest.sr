@@ -1,0 +1,25 @@
+// Positive test: parent declares [push_constant] after a nested srinput ref.
+// The nested srinput has no push constant, so the total in the flat view = 1, which is allowed.
+
+cbuffer PushData
+{
+    float m_Val;
+};
+
+cbuffer BaseConsts
+{
+    float m_Data;
+};
+
+srinput BaseInputs
+{
+    BaseConsts m_Base;
+};
+
+srinput GoodParent
+{
+    BaseInputs m_Nested;     // composition nesting
+
+    [push_constant]
+    PushData   m_Push;       // OK: total push constants in flat view = 1
+};

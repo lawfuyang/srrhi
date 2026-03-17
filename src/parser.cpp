@@ -1,4 +1,5 @@
 ﻿#include "types.h"
+#include "flatten.h"
 
 #include <fstream>
 #include <sstream>
@@ -199,6 +200,9 @@ struct Parser
 
     // Maps struct name to pointer into m_Result.m_Structs (stable due to deque)
     std::unordered_map<std::string, StructType*> m_StructMap;
+
+    // Maps srinput name to index in m_Result.m_SrInputDefs (indices are stable)
+    std::unordered_map<std::string, size_t> m_SrInputMap;
 
     Parser(const std::string& src, ParseResult& r, const std::string& path)
         : m_Lex(src), m_Result(r), m_FilePath(path)
@@ -913,7 +917,9 @@ struct Parser
                         sc.m_TypeName = scalarTypeTok.m_Text;
                         sc.m_Name     = nameTok.m_Text;
                         sc.m_Value    = valueStr;
+                        int scIdx = static_cast<int>(srInputDef.m_ScalarConsts.size());
                         srInputDef.m_ScalarConsts.push_back(std::move(sc));
+                        srInputDef.m_BodyOrder.push_back({3, scIdx}); // ScalarConst
                         continue;
                     }
 
@@ -1011,7 +1017,9 @@ struct Parser
                         sm.m_Kind       = foundSamplerKind;
                         sm.m_TypeName   = typeName.m_Text;
                         sm.m_MemberName = memberName.m_Text;
+                        int smIdx = static_cast<int>(srInputDef.m_Samplers.size());
                         srInputDef.m_Samplers.push_back(std::move(sm));
+                        srInputDef.m_BodyOrder.push_back({2, smIdx}); // Sampler
                         continue;
                     }
 
@@ -1106,7 +1114,9 @@ struct Parser
                         rm.m_TypeName    = fullTypeName;
                         rm.m_TemplateArg = templateArg;
                         rm.m_MemberName  = memberName.m_Text;
+                        int rmIdx = static_cast<int>(srInputDef.m_Resources.size());
                         srInputDef.m_Resources.push_back(std::move(rm));
+                        srInputDef.m_BodyOrder.push_back({1, rmIdx}); // Resource
                     }
                     else
                     {
@@ -1121,46 +1131,117 @@ struct Parser
                             }
                         }
 
-                        if (!bIsCBufferType)
+                        if (bIsCBufferType)
                         {
-                            throw std::runtime_error(m_FilePath + ":" + std::to_string(typeLine) +
-                                                     ": srinput scope only allows cbuffer types or resource types; '" +
-                                                     typeName.m_Text + "' is not a cbuffer or known resource type");
+                            Token memberName = Expect(TokKind::Ident, "member name in srinput");
+                            Expect(TokKind::Semicolon, ";");
+
+                            if (!srInputMemberNames.insert(memberName.m_Text).second)
+                            {
+                                LogMsg("[parser] ERROR: duplicate member name '%s' in srinput '%s' at line %d\n",
+                                       memberName.m_Text.c_str(), srInputDef.m_Name.c_str(), memberName.m_Line);
+                                throw std::runtime_error(m_FilePath + ":" + std::to_string(memberName.m_Line) +
+                                                         ": duplicate member name '" + memberName.m_Text +
+                                                         "' in srinput '" + srInputDef.m_Name + "'");
+                            }
+
+                            if (bNextIsPushConstant && !srInputDef.m_Members.empty())
+                            {
+                                LogMsg("[parser] ERROR: [push_constant] member '%s' is not the first cbuffer in srinput '%s' at line %d\n",
+                                       memberName.m_Text.c_str(), srInputDef.m_Name.c_str(), memberName.m_Line);
+                                throw std::runtime_error(m_FilePath + ":" + std::to_string(memberName.m_Line) +
+                                                         ": [push_constant] member '" + memberName.m_Text +
+                                                         "' must be the first cbuffer declared in srinput '" +
+                                                         srInputDef.m_Name + "' (it always occupies register b0)");
+                            }
+
+                            SrInputMember member;
+                            member.m_CBufferName    = typeName.m_Text;
+                            member.m_MemberName     = memberName.m_Text;
+                            member.m_bIsPushConstant = bNextIsPushConstant;
+                            int mbIdx = static_cast<int>(srInputDef.m_Members.size());
+                            srInputDef.m_Members.push_back(std::move(member));
+                            srInputDef.m_BodyOrder.push_back({0, mbIdx}); // CBuffer
                         }
-
-                        Token memberName = Expect(TokKind::Ident, "member name in srinput");
-                        Expect(TokKind::Semicolon, ";");
-
-                        if (!srInputMemberNames.insert(memberName.m_Text).second)
+                        else
                         {
-                            LogMsg("[parser] ERROR: duplicate member name '%s' in srinput '%s' at line %d\n",
-                                   memberName.m_Text.c_str(), srInputDef.m_Name.c_str(), memberName.m_Line);
-                            throw std::runtime_error(m_FilePath + ":" + std::to_string(memberName.m_Line) +
-                                                     ": duplicate member name '" + memberName.m_Text +
-                                                     "' in srinput '" + srInputDef.m_Name + "'");
-                        }
+                            // ---- Check if it is a known srinput name (composition) ----
+                            auto srIt = m_SrInputMap.find(typeName.m_Text);
+                            if (srIt != m_SrInputMap.end())
+                            {
+                                // ---- Nested srinput reference ----
+                                if (bNextIsPushConstant)
+                                {
+                                    LogMsg("[parser] ERROR: [push_constant] cannot be applied to nested srinput '%s' in srinput '%s' at line %d\n",
+                                           typeName.m_Text.c_str(), srInputDef.m_Name.c_str(), typeName.m_Line);
+                                    throw std::runtime_error(m_FilePath + ":" + std::to_string(typeName.m_Line) +
+                                                             ": [push_constant] attribute cannot be applied to nested srinput '" +
+                                                             typeName.m_Text + "'; it is only valid on cbuffer members");
+                                }
 
-                        if (bNextIsPushConstant && !srInputDef.m_Members.empty())
-                        {
-                            LogMsg("[parser] ERROR: [push_constant] member '%s' is not the first cbuffer in srinput '%s' at line %d\n",
-                                   memberName.m_Text.c_str(), srInputDef.m_Name.c_str(), memberName.m_Line);
-                            throw std::runtime_error(m_FilePath + ":" + std::to_string(memberName.m_Line) +
-                                                     ": [push_constant] member '" + memberName.m_Text +
-                                                     "' must be the first cbuffer declared in srinput '" +
-                                                     srInputDef.m_Name + "' (it always occupies register b0)");
-                        }
+                                const SrInputDef& nestedDef = m_Result.m_SrInputDefs[srIt->second];
 
-                        SrInputMember member;
-                        member.m_CBufferName    = typeName.m_Text;
-                        member.m_MemberName     = memberName.m_Text;
-                        member.m_bIsPushConstant = bNextIsPushConstant;
-                        srInputDef.m_Members.push_back(std::move(member));
+                                // Parse the local variable name for this nested ref
+                                Token memberName = Expect(TokKind::Ident, "member name for nested srinput");
+                                Expect(TokKind::Semicolon, ";");
+
+                                // Flatten nested srinput and check for name clashes across all inner names
+                                FlatSrInput flat = FlattenSrInput(nestedDef, m_Result.m_SrInputDefs);
+                                auto checkFlatName = [&](const std::string& name)
+                                {
+                                    if (!srInputMemberNames.insert(name).second)
+                                    {
+                                        LogMsg("[parser] ERROR: name '%s' from nested srinput '%s' clashes with existing member in srinput '%s' at line %d\n",
+                                               name.c_str(), typeName.m_Text.c_str(), srInputDef.m_Name.c_str(), memberName.m_Line);
+                                        throw std::runtime_error(m_FilePath + ":" + std::to_string(memberName.m_Line) +
+                                                                 ": name '" + name + "' from nested srinput '" +
+                                                                 typeName.m_Text + "' clashes with an existing member name in '" +
+                                                                 srInputDef.m_Name + "'");
+                                    }
+                                };
+                                for (const auto& m  : flat.m_Members)      checkFlatName(m.m_MemberName);
+                                for (const auto& r  : flat.m_Resources)    checkFlatName(r.m_MemberName);
+                                for (const auto& s  : flat.m_Samplers)     checkFlatName(s.m_MemberName);
+                                for (const auto& sc : flat.m_ScalarConsts) checkFlatName(sc.m_Name);
+
+                                // Register the nested ref
+                                SrInputRef ref;
+                                ref.m_SrInputName = typeName.m_Text;
+                                ref.m_VarName     = memberName.m_Text;
+                                int refIdx = static_cast<int>(srInputDef.m_NestedSrInputs.size());
+                                srInputDef.m_NestedSrInputs.push_back(std::move(ref));
+                                srInputDef.m_BodyOrder.push_back({4, refIdx}); // NestedRef
+                            }
+                            else
+                            {
+                                throw std::runtime_error(m_FilePath + ":" + std::to_string(typeLine) +
+                                                         ": srinput scope only allows cbuffer types, resource types, or nested srinput names; '" +
+                                                         typeName.m_Text + "' is not a cbuffer, known resource type, or previously-declared srinput");
+                            }
+                        }
                     }
                 }
 
                 Expect(TokKind::RBrace, "}");
                 Expect(TokKind::Semicolon, ";");
 
+                // After full parse, validate that the flattened srinput has at most 1 push constant
+                {
+                    FlatSrInput flat = FlattenSrInput(srInputDef, m_Result.m_SrInputDefs);
+                    int pushConstCount = 0;
+                    for (const auto& member : flat.m_Members)
+                        if (member.m_bIsPushConstant) ++pushConstCount;
+                    if (pushConstCount > 1)
+                    {
+                        LogMsg("[parser] ERROR: srinput '%s' has %d push constants in its flattened view; at most 1 is allowed\n",
+                               srInputDef.m_Name.c_str(), pushConstCount);
+                        throw std::runtime_error(m_FilePath + ": srinput '" + srInputDef.m_Name +
+                                                 "' has " + std::to_string(pushConstCount) +
+                                                 " push constants in its flattened view; at most 1 is allowed");
+                    }
+                }
+
+                m_SrInputMap[srInputDef.m_Name] = m_Result.m_SrInputDefs.size();
                 m_Result.m_SrInputDefs.push_back(std::move(srInputDef));
                 continue;
             }

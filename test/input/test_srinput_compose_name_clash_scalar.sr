@@ -1,0 +1,19 @@
+// EXPECTED TO FAIL: flattened scalar const name clash.
+// BaseInputs declares scalar 'MaxLights'; parent also tries to declare 'MaxLights'.
+
+cbuffer FrameConsts
+{
+    float m_Time;
+};
+
+srinput BaseInputs
+{
+    FrameConsts m_Frame;
+    uint        MaxLights = 16;
+};
+
+srinput ExtendedPass
+{
+    BaseInputs m_Base;
+    uint       MaxLights = 32;  // ERROR: 'MaxLights' clashes with BaseInputs scalar
+};

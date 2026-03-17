@@ -84,6 +84,14 @@ static const std::unordered_set<std::string> k_ExpectedFailStems = {
     "test_srinput_space_invalid_unknown_attr",
     "test_srinput_space_invalid_negative",
     "test_srinput_space_invalid_empty_paren",
+    // Srinput composition error tests
+    "test_srinput_compose_push_constant_on_ref",
+    "test_srinput_compose_push_constant_multiple",
+    "test_srinput_compose_name_clash_cbuf",
+    "test_srinput_compose_name_clash_resource",
+    "test_srinput_compose_name_clash_sampler",
+    "test_srinput_compose_name_clash_scalar",
+    "test_srinput_compose_forward_ref",
 };
 
 // ---------------------------------------------------------------------------

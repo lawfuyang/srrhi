@@ -1,0 +1,40 @@
+// Positive test: srinput that nests two different srinputs.
+// Parent nests both LightInputs and ShadowInputs.
+
+cbuffer LightConsts
+{
+    float3 m_Direction;
+    float  m_Intensity;
+};
+
+cbuffer ShadowConsts
+{
+    float4x4 m_ShadowMatrix;
+    float    m_Bias;
+};
+
+cbuffer ParentConsts
+{
+    uint m_FrameIdx;
+};
+
+srinput LightInputs
+{
+    LightConsts              m_Light;
+    Texture2D<float4>        m_LightMap;
+};
+
+srinput ShadowInputs
+{
+    ShadowConsts             m_Shadow;
+    Texture2D<float>         m_ShadowMap;
+    SamplerComparisonState   m_ShadowSampler;
+};
+
+srinput CombinedPass
+{
+    LightInputs              m_Lighting;
+    ShadowInputs             m_Shadows;
+    ParentConsts             m_Parent;
+    Texture2D<float4>        m_ScreenColor;
+};

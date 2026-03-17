@@ -1,0 +1,32 @@
+// Positive test: basic srinput composition.
+// BaseInputs is nested inside ExtendedPass.
+// The generated HLSL/C++ should flatten: FrameConsts at b0, PassConsts at b1.
+
+cbuffer FrameConsts
+{
+    float4x4 m_ViewProj;
+    float    m_Time;
+};
+
+cbuffer PassConsts
+{
+    uint m_PassIdx;
+};
+
+cbuffer SceneConsts
+{
+    float3 m_SunDir;
+    float  m_Intensity;
+};
+
+srinput BaseInputs
+{
+    FrameConsts m_Frame;
+    PassConsts  m_Pass;
+};
+
+srinput ExtendedPass
+{
+    BaseInputs  m_Base;
+    SceneConsts m_Scene;
+};

@@ -1,0 +1,27 @@
+// Positive test: srinput composition with scalar constants from both
+// the nested and parent srinputs.
+
+cbuffer FrameConsts
+{
+    float4x4 m_ViewProj;
+};
+
+cbuffer PassConsts
+{
+    uint m_PassIdx;
+};
+
+srinput BaseInputs
+{
+    FrameConsts       m_Frame;
+    float             MaxDepth   = 1000.0;
+    static const uint Version    = 3;
+};
+
+srinput ExtendedPass
+{
+    BaseInputs        m_Base;
+    PassConsts        m_Pass;
+    float             Exposure   = 1.0;
+    const int         DebugMode  = 0;
+};

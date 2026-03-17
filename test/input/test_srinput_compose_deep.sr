@@ -1,0 +1,37 @@
+// Positive test: deep 3-level srinput composition: A -> B -> C.
+// The generated HLSL/C++ for C should inline all resources from A and B.
+
+cbuffer AConsts
+{
+    float m_A;
+};
+
+cbuffer BConsts
+{
+    float m_B;
+};
+
+cbuffer CConsts
+{
+    float m_C;
+};
+
+srinput LevelA
+{
+    AConsts          m_AConsts;
+    Texture2D<float> m_ATex;
+};
+
+srinput LevelB
+{
+    LevelA           m_A;
+    BConsts          m_BConsts;
+    Texture2D<float> m_BTex;
+};
+
+srinput LevelC
+{
+    LevelB           m_B;
+    CConsts          m_CConsts;
+    Texture2D<float> m_CTex;
+};

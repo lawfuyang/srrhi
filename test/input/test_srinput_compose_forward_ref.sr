@@ -1,0 +1,19 @@
+// EXPECTED TO FAIL: forward reference to a srinput declared later.
+// Parser processes sequentially, so a reference to a not-yet-declared srinput
+// is treated as an unknown identifier (not a cbuffer, resource, or srinput).
+
+cbuffer FrameConsts
+{
+    float m_Time;
+};
+
+srinput EarlyComposer
+{
+    FrameConsts m_Frame;
+    LaterInputs m_Late;  // ERROR: LaterInputs is declared after EarlyComposer
+};
+
+srinput LaterInputs
+{
+    FrameConsts m_Frame;
+};

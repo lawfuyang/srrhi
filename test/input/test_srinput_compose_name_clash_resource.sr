@@ -1,0 +1,13 @@
+// EXPECTED TO FAIL: flattened resource member name clash.
+// BaseInputs has resource 'm_Albedo'; parent also tries to declare 'm_Albedo'.
+
+srinput BaseInputs
+{
+    Texture2D<float4> m_Albedo;
+};
+
+srinput ExtendedPass
+{
+    BaseInputs        m_Base;
+    Texture2D<float4> m_Albedo;  // ERROR: 'm_Albedo' clashes with flattened BaseInputs resource
+};
