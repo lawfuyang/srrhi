@@ -1,2 +1,2 @@
-# Shader Resource Render Hardware Interface (SSRHI)
+# Shader Resource Render Hardware Interface (SRRHI)
 WIP

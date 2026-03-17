@@ -122,6 +122,7 @@ foreach(VALIDATION_FILE ${VALIDATION_SOURCES})
     
     target_include_directories(${TARGET_NAME} 
         PRIVATE "${CMAKE_SOURCE_DIR}/test/output/cpp"
+        PRIVATE "${CMAKE_SOURCE_DIR}"
         PRIVATE "${DXC_INSTALL_DIR}/inc"
     )
     

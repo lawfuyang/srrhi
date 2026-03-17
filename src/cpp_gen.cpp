@@ -6,6 +6,74 @@
 #include <cctype>
 
 // ---------------------------------------------------------------------------
+// Map a ResourceKind to the corresponding srrhi::ResourceType enum string.
+// Used to initialize ResourceEntry::type in the generated resources[] array.
+// ---------------------------------------------------------------------------
+static std::string ResourceKindToSrrResourceType(ResourceKind kind)
+{
+    switch (kind)
+    {
+        case ResourceKind::Texture1D:
+        case ResourceKind::Texture1DArray:
+        case ResourceKind::Texture2D:
+        case ResourceKind::Texture2DArray:
+        case ResourceKind::Texture2DMS:
+        case ResourceKind::Texture2DMSArray:
+        case ResourceKind::Texture3D:
+        case ResourceKind::TextureCube:
+        case ResourceKind::TextureCubeArray:        return "srrhi::ResourceType::Texture_SRV";
+        case ResourceKind::Buffer:                  return "srrhi::ResourceType::TypedBuffer_SRV";
+        case ResourceKind::StructuredBuffer:        return "srrhi::ResourceType::StructuredBuffer_SRV";
+        case ResourceKind::ByteAddressBuffer:       return "srrhi::ResourceType::RawBuffer_SRV";
+        case ResourceKind::RaytracingAccelerationStructure: return "srrhi::ResourceType::RayTracingAccelStruct";
+        case ResourceKind::RWTexture1D:
+        case ResourceKind::RWTexture1DArray:
+        case ResourceKind::RWTexture2D:
+        case ResourceKind::RWTexture2DArray:
+        case ResourceKind::RWTexture3D:             return "srrhi::ResourceType::Texture_UAV";
+        case ResourceKind::RWBuffer:                return "srrhi::ResourceType::TypedBuffer_UAV";
+        case ResourceKind::RWStructuredBuffer:      return "srrhi::ResourceType::StructuredBuffer_UAV";
+        case ResourceKind::RWByteAddressBuffer:     return "srrhi::ResourceType::RawBuffer_UAV";
+    }
+    return "srrhi::ResourceType::TypedBuffer_SRV";  // unreachable fallback
+}
+
+// Returns true if the ResourceKind is a texture type (SRV or UAV).
+static bool IsTextureKind(ResourceKind kind)
+{
+    switch (kind)
+    {
+        case ResourceKind::Texture1D:
+        case ResourceKind::Texture1DArray:
+        case ResourceKind::Texture2D:
+        case ResourceKind::Texture2DArray:
+        case ResourceKind::Texture2DMS:
+        case ResourceKind::Texture2DMSArray:
+        case ResourceKind::Texture3D:
+        case ResourceKind::TextureCube:
+        case ResourceKind::TextureCubeArray:
+        case ResourceKind::RWTexture1D:
+        case ResourceKind::RWTexture1DArray:
+        case ResourceKind::RWTexture2D:
+        case ResourceKind::RWTexture2DArray:
+        case ResourceKind::RWTexture3D:             return true;
+        default:                                    return false;
+    }
+}
+
+// Returns true if the ResourceKind is an array texture type.
+// Array textures support baseArraySlice/numArraySlices parameters.
+static bool IsArrayTextureKind(ResourceKind kind)
+{
+    return kind == ResourceKind::Texture1DArray
+        || kind == ResourceKind::Texture2DArray
+        || kind == ResourceKind::Texture2DMSArray
+        || kind == ResourceKind::TextureCubeArray
+        || kind == ResourceKind::RWTexture1DArray
+        || kind == ResourceKind::RWTexture2DArray;
+}
+
+// ---------------------------------------------------------------------------
 // C++ type mapping from BuiltinType
 // ---------------------------------------------------------------------------
 struct CppTypeInfo { std::string m_TypeName; int m_ArrayMult = 0; };
@@ -474,6 +542,22 @@ std::string GenerateCpp(const ParseResult& pr,
     if (!pr.m_SrInputDefs.empty())
         out << "#include <cstring>\n";
 
+    // Include srrhi.h for ResourceEntry and ResourceType (resource binding API).
+    // Needed when any srinput has cbuffer references, SRV/UAV resources, or samplers.
+    {
+        bool bNeedsResourceEntries = false;
+        for (const auto& srInputDef : pr.m_SrInputDefs)
+        {
+            if (!srInputDef.m_Members.empty() || !srInputDef.m_Resources.empty() || !srInputDef.m_Samplers.empty())
+            {
+                bNeedsResourceEntries = true;
+                break;
+            }
+        }
+        if (bNeedsResourceEntries)
+            out << "#include \"srrhi.h\"\n";
+    }
+
     out << "\n";
     out << "namespace srrhi\n{\n\n";
 
@@ -604,6 +688,11 @@ std::string GenerateCpp(const ParseResult& pr,
                 << " = " << sc.m_Value << ";\n";
         }
 
+        // Total resource count: CBuffers + SRVs + UAVs + Samplers
+        const uint32_t numCBuffers = static_cast<uint32_t>(srInputDef.m_Members.size());
+        const uint32_t numResources = numCBuffers + numSRVs + numUAVs + numSamplers;
+        out << "    static constexpr uint32_t NumResources = NumCBuffers + NumSRVs + NumUAVs + NumSamplers;\n";
+
         // Compose cbuffer structs directly as member variables
         if (!srInputDef.m_Members.empty())
         {
@@ -613,6 +702,183 @@ std::string GenerateCpp(const ParseResult& pr,
                 out << "    " << member.m_CBufferName << " " << member.m_MemberName << ";\n";
             }
         }
+
+        // Resource entry array and per-resource setter functions.
+        // Array ordering: CBuffers [0..N-1], SRVs [N..N+S-1], UAVs [N+S..N+S+U-1], Samplers [last].
+        if (numResources > 0)
+        {
+            out << "\n";
+            out << "    // Flat array of all resource binding entries for this srinput scope.\n";
+            out << "    // 'slot' and 'type' are compile-time constants; 'pResource' is set at runtime.\n";
+            out << "    srrhi::ResourceEntry m_Resources[NumResources] = {\n";
+
+            // -- CBuffer entries --
+            if (!srInputDef.m_Members.empty())
+            {
+                out << "        // ConstantBuffers (b# registers)\n";
+                for (const auto& member : srInputDef.m_Members)
+                {
+                    const std::string constName = CleanMemberName(member.m_MemberName) + "RegisterIndex";
+                    out << "        { nullptr, " << constName
+                        << ", srrhi::ResourceType::ConstantBuffer },\n";
+                }
+            }
+
+            // -- SRV entries --
+            bool firstSrv = true;
+            for (const auto& rm : srInputDef.m_Resources)
+            {
+                if (!IsUAV(rm.m_Kind))
+                {
+                    if (firstSrv) { out << "        // SRVs (t# registers)\n"; firstSrv = false; }
+                    const std::string constName = CleanMemberName(rm.m_MemberName) + "RegisterIndex";
+                    out << "        { nullptr, " << constName
+                        << ", " << ResourceKindToSrrResourceType(rm.m_Kind) << " },\n";
+                }
+            }
+
+            // -- UAV entries --
+            bool firstUav = true;
+            for (const auto& rm : srInputDef.m_Resources)
+            {
+                if (IsUAV(rm.m_Kind))
+                {
+                    if (firstUav) { out << "        // UAVs (u# registers)\n"; firstUav = false; }
+                    const std::string constName = CleanMemberName(rm.m_MemberName) + "RegisterIndex";
+                    out << "        { nullptr, " << constName
+                        << ", " << ResourceKindToSrrResourceType(rm.m_Kind) << " },\n";
+                }
+            }
+
+            // -- Sampler entries --
+            if (!srInputDef.m_Samplers.empty())
+            {
+                out << "        // Samplers (s# registers)\n";
+                for (const auto& sm : srInputDef.m_Samplers)
+                {
+                    const std::string constName = CleanMemberName(sm.m_MemberName) + "RegisterIndex";
+                    out << "        { nullptr, " << constName
+                        << ", srrhi::ResourceType::Sampler },\n";
+                }
+            }
+
+            out << "    };\n";
+
+            // -- Per-resource setter functions --
+            out << "\n";
+            uint32_t resourceIdx = 0;
+
+            // CBuffer setters: simple void* overload only
+            for (const auto& member : srInputDef.m_Members)
+            {
+                const std::string setterName = "Set" + CleanMemberName(member.m_MemberName);
+                out << "    void " << setterName << "(void* pResource)"
+                    << " { m_Resources[" << resourceIdx << "].pResource = pResource; }\n";
+                ++resourceIdx;
+            }
+
+            // SRV setters
+            for (const auto& rm : srInputDef.m_Resources)
+            {
+                if (!IsUAV(rm.m_Kind))
+                {
+                    const std::string setterName = "Set" + CleanMemberName(rm.m_MemberName);
+                    if (IsTextureKind(rm.m_Kind))
+                    {
+                        // Texture_SRV: simple overload (uses default mip/slice values).
+                        out << "    void " << setterName << "(void* pResource)"
+                            << " { m_Resources[" << resourceIdx << "].pResource = pResource; }\n";
+
+                        if (IsArrayTextureKind(rm.m_Kind))
+                        {
+                            // Array Texture_SRV: full 5-param overload for mip + array-slice control.
+                            // '-1' for numMipLevels means \"all mip levels from baseMipLevel\".
+                            // '-1' for numArraySlices means \"all slices from baseArraySlice\".
+                            out << "    void " << setterName
+                                << "(void* pResource, int32_t baseMipLevel, int32_t numMipLevels,"
+                                   " int32_t baseArraySlice, int32_t numArraySlices)\n    {\n";
+                            out << "        m_Resources[" << resourceIdx << "].pResource      = pResource;\n";
+                            out << "        m_Resources[" << resourceIdx << "].baseMipLevel   = baseMipLevel;\n";
+                            out << "        m_Resources[" << resourceIdx << "].numMipLevels   = numMipLevels;\n";
+                            out << "        m_Resources[" << resourceIdx << "].baseArraySlice = baseArraySlice;\n";
+                            out << "        m_Resources[" << resourceIdx << "].numArraySlices = numArraySlices;\n";
+                            out << "    }\n";
+                        }
+                        else
+                        {
+                            // Non-array Texture_SRV: 3-param overload for mip-range control.
+                            // '-1' for numMipLevels means \"all mip levels from baseMipLevel\".
+                            out << "    void " << setterName
+                                << "(void* pResource, int32_t baseMipLevel, int32_t numMipLevels)\n    {\n";
+                            out << "        m_Resources[" << resourceIdx << "].pResource    = pResource;\n";
+                            out << "        m_Resources[" << resourceIdx << "].baseMipLevel = baseMipLevel;\n";
+                            out << "        m_Resources[" << resourceIdx << "].numMipLevels = numMipLevels;\n";
+                            out << "    }\n";
+                        }
+                    }
+                    else
+                    {
+                        // Non-texture SRV (typed/structured/raw buffer, RTAS): simple void* overload only.
+                        out << "    void " << setterName << "(void* pResource)"
+                            << " { m_Resources[" << resourceIdx << "].pResource = pResource; }\n";
+                    }
+                    ++resourceIdx;
+                }
+            }
+
+            // UAV setters
+            for (const auto& rm : srInputDef.m_Resources)
+            {
+                if (IsUAV(rm.m_Kind))
+                {
+                    const std::string setterName = "Set" + CleanMemberName(rm.m_MemberName);
+                    if (IsTextureKind(rm.m_Kind))
+                    {
+                        // numMipLevels is always hardcoded to 1 — a UAV can only bind a single mip at a time.
+                        if (IsArrayTextureKind(rm.m_Kind))
+                        {
+                            // Array Texture_UAV: 4-param overload (baseMip + array-slice control).
+                            // '-1' for numArraySlices means \"all slices from baseArraySlice\".
+                            out << "    void " << setterName
+                                << "(void* pResource, int32_t baseMipLevel,"
+                                   " int32_t baseArraySlice, int32_t numArraySlices)\n    {\n";
+                            out << "        m_Resources[" << resourceIdx << "].pResource      = pResource;\n";
+                            out << "        m_Resources[" << resourceIdx << "].baseMipLevel   = baseMipLevel;\n";
+                            out << "        m_Resources[" << resourceIdx << "].numMipLevels   = 1;\n";
+                            out << "        m_Resources[" << resourceIdx << "].baseArraySlice = baseArraySlice;\n";
+                            out << "        m_Resources[" << resourceIdx << "].numArraySlices = numArraySlices;\n";
+                            out << "    }\n";
+                        }
+                        else
+                        {
+                            // Non-array Texture_UAV: 2-param overload (baseMip only).
+                            out << "    void " << setterName
+                                << "(void* pResource, int32_t baseMipLevel)\n    {\n";
+                            out << "        m_Resources[" << resourceIdx << "].pResource    = pResource;\n";
+                            out << "        m_Resources[" << resourceIdx << "].baseMipLevel = baseMipLevel;\n";
+                            out << "        m_Resources[" << resourceIdx << "].numMipLevels = 1;\n";
+                            out << "    }\n";
+                        }
+                    }
+                    else
+                    {
+                        // Non-texture UAV (typed/structured/raw buffer): simple void* overload only.
+                        out << "    void " << setterName << "(void* pResource)"
+                            << " { m_Resources[" << resourceIdx << "].pResource = pResource; }\n";
+                    }
+                    ++resourceIdx;
+                }
+            }
+
+            // Sampler setters: simple void* overload only
+            for (const auto& sm : srInputDef.m_Samplers)
+            {
+                const std::string setterName = "Set" + CleanMemberName(sm.m_MemberName);
+                out << "    void " << setterName << "(void* pResource)"
+                    << " { m_Resources[" << resourceIdx << "].pResource = pResource; }\n";
+                ++resourceIdx;
+            }
+        }  // if (numResources > 0)
 
         out << "};\n\n";
 
@@ -672,6 +938,9 @@ std::string GenerateCpp(const ParseResult& pr,
                         << " == " << samplerReg++ << "u);\n";
                 }
             }
+
+            out << "static_assert(" << srInputDef.m_Name << "::NumResources == "
+                << numResources << "u);\n";
         }  // if (bEmitValidation)
 
         out << "\n";

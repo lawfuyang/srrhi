@@ -1,0 +1,47 @@
+// Tests for resource entry array and setter functions in generated srinput structs.
+// Covers every ResourceType enum value (except PushConstants) in a single srinput scope.
+
+cbuffer FrameData
+{
+    float4x4 viewProj;
+    float    time;
+};
+
+srinput SetterTestInputs
+{
+    // ConstantBuffer (b0)
+    FrameData                        m_Frame;
+
+    // Texture SRVs (Texture_SRV) — t0..t8  — use full 5-param setter
+    Texture1D<float4>                m_Tex1d;
+    Texture1DArray<float4>           m_Tex1dArray;
+    Texture2D<float4>                m_Tex2d;
+    Texture2DArray<float4>           m_Tex2dArray;
+    Texture2DMS<float4>              m_Tex2dms;
+    Texture2DMSArray<float4>         m_Tex2dmsArray;
+    Texture3D<float4>                m_Tex3d;
+    TextureCube<float4>              m_TexCube;
+    TextureCubeArray<float4>         m_TexCubeArray;
+
+    // Non-texture SRVs — t9..t12 — use simple void* setter
+    Buffer<float4>                   m_TypedBuf;       // TypedBuffer_SRV
+    StructuredBuffer<uint>           m_StructBuf;      // StructuredBuffer_SRV
+    ByteAddressBuffer                m_RawBuf;         // RawBuffer_SRV
+    RaytracingAccelerationStructure  m_AccelStruct;    // RayTracingAccelStruct
+
+    // Texture UAVs (Texture_UAV) — u0..u4  — use 4-param setter (numMipLevels hardcoded to 1)
+    RWTexture1D<float4>              m_RwTex1d;
+    RWTexture1DArray<float4>         m_RwTex1dArray;
+    RWTexture2D<float4>              m_RwTex2d;
+    RWTexture2DArray<float4>         m_RwTex2dArray;
+    RWTexture3D<float4>              m_RwTex3d;
+
+    // Non-texture UAVs — u5..u7 — use simple void* setter
+    RWBuffer<float4>                 m_RwTypedBuf;     // TypedBuffer_UAV
+    RWStructuredBuffer<uint>         m_RwStructBuf;    // StructuredBuffer_UAV
+    RWByteAddressBuffer              m_RwRawBuf;       // RawBuffer_UAV
+
+    // Samplers (s0..s1) — use simple void* setter
+    SamplerState                     m_LinearSampler;
+    SamplerComparisonState           m_ShadowSampler;
+};
