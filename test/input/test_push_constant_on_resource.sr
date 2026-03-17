@@ -1,0 +1,8 @@
+// EXPECTED TO FAIL: [push_constant] applied to a resource (Texture2D).
+// The attribute is only valid on cbuffer members.
+
+srinput InvalidPushOnResource
+{
+    [push_constant]
+    Texture2D<float4> m_Texture;
+};

@@ -1,0 +1,21 @@
+// EXPECTED TO FAIL: two [push_constant] members in the same srinput.
+// Only one push constant is allowed per srinput.
+
+cbuffer PushA
+{
+    float val1;
+};
+
+cbuffer PushB
+{
+    float val2;
+};
+
+srinput TwoPushInputs
+{
+    [push_constant]
+    PushA m_PushA;
+
+    [push_constant]
+    PushB m_PushB;
+};

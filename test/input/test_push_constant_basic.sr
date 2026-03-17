@@ -1,0 +1,22 @@
+// Basic push constant test: one [push_constant] cbuffer + one regular cbuffer.
+// The push constant is always at register b0.
+// The regular cbuffer follows at b1.
+
+cbuffer PushData
+{
+    float    smallData;
+};
+
+cbuffer FrameData
+{
+    float4x4 viewProj;
+    float    time;
+};
+
+srinput SetterTestInputs
+{
+    [push_constant]
+    PushData m_PushData;
+
+    FrameData m_Frame;
+};

@@ -74,13 +74,15 @@ struct StructType
 
 // ---------------------------------------------------------------------------
 // SrInputMember: a member within an srinput scope (cbuffer reference)
-//   m_CBufferName – name of the cbuffer type being referenced
-//   m_MemberName  – variable name for this member
+//   m_CBufferName    – name of the cbuffer type being referenced
+//   m_MemberName     – variable name for this member
+//   m_bIsPushConstant – true if this member was annotated with [push_constant]
 // ---------------------------------------------------------------------------
 struct SrInputMember
 {
     std::string m_CBufferName;
     std::string m_MemberName;
+    bool        m_bIsPushConstant = false;
 };
 
 // ---------------------------------------------------------------------------

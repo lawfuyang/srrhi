@@ -72,6 +72,12 @@ static const std::unordered_set<std::string> k_ExpectedFailStems = {
     "test_srinput_scalar_bad_type",
     "test_srinput_scalar_no_value",
     "test_srinput_scalar_duplicate",
+    // Push constant error tests
+    "test_push_constant_multiple",
+    "test_push_constant_too_large",
+    "test_push_constant_on_resource",
+    "test_push_constant_on_sampler",
+    "test_push_constant_not_first",
 };
 
 // ---------------------------------------------------------------------------
@@ -512,10 +518,14 @@ int RunReflectionTests(const fs::path& testInputDir)
             parseError = e.what();
         }
 
-        // ---- Negative-test check -------------------------------------------
-        if (expectFail)
+        // ---- Negative-test check (parse phase) ----------------------------
+        // If parsing threw and this was an expected-fail test, it passes.
+        // If parsing threw unexpectedly, it fails.
+        // If parsing succeeded but the test was expected to fail, we continue
+        // to later phases (layout, hlslgen) where the failure might occur.
+        if (!parseOk)
         {
-            if (!parseOk)
+            if (expectFail)
             {
                 LogMsg("[test]   PASS  (expected failure — parser threw: %s)\n",
                        parseError.c_str());
@@ -523,16 +533,9 @@ int RunReflectionTests(const fs::path& testInputDir)
             }
             else
             {
-                LogMsg("[test]   FAIL  (expected parse failure, but parsing succeeded)\n");
+                LogMsg("[test]   FAIL  (unexpected parse error: %s)\n", parseError.c_str());
                 ++failed;
             }
-            continue;
-        }
-
-        if (!parseOk)
-        {
-            LogMsg("[test]   FAIL  (unexpected parse error: %s)\n", parseError.c_str());
-            ++failed;
             continue;
         }
 
@@ -544,8 +547,16 @@ int RunReflectionTests(const fs::path& testInputDir)
         }
         catch (const std::exception& e)
         {
-            LogMsg("[test]   FAIL  (layout error: %s)\n", e.what());
-            ++failed;
+            if (expectFail)
+            {
+                LogMsg("[test]   PASS  (expected failure — layout threw: %s)\n", e.what());
+                ++passed;
+            }
+            else
+            {
+                LogMsg("[test]   FAIL  (layout error: %s)\n", e.what());
+                ++failed;
+            }
             continue;
         }
 
@@ -558,7 +569,23 @@ int RunReflectionTests(const fs::path& testInputDir)
         }
         catch (const std::exception& e)
         {
-            LogMsg("[test]   FAIL  (HLSL gen error: %s)\n", e.what());
+            if (expectFail)
+            {
+                LogMsg("[test]   PASS  (expected failure — hlsl gen threw: %s)\n", e.what());
+                ++passed;
+            }
+            else
+            {
+                LogMsg("[test]   FAIL  (HLSL gen error: %s)\n", e.what());
+                ++failed;
+            }
+            continue;
+        }
+
+        // If an expected-fail test reached here without any exception, it's a failure.
+        if (expectFail)
+        {
+            LogMsg("[test]   FAIL  (expected failure, but all stages (parse/layout/hlslgen) succeeded)\n");
             ++failed;
             continue;
         }

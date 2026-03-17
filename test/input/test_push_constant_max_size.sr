@@ -1,0 +1,19 @@
+// Maximum-size push constant: cbuffer with content totalling exactly 252 bytes
+// (under the 256-byte limit). Verifies that the boundary condition is accepted.
+
+cbuffer PushMax
+{
+    float4x4 mat0;   // 64 bytes
+    float4x4 mat1;   // 64 bytes
+    float4x4 mat2;   // 64 bytes
+    float4    vec0;   // 16 bytes
+    float4    vec1;   // 16 bytes
+    float4    vec2;   // 16 bytes
+    float3    extra;  // 12 bytes (total = 252 bytes, which is < 256)
+};
+
+srinput LargeButValidInput
+{
+    [push_constant]
+    PushMax m_PushMax;
+};

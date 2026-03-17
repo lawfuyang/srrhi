@@ -1,0 +1,36 @@
+// Push constant with resources: tests [push_constant] combined with
+// SRV resources, UAVs, samplers and multiple regular cbuffers.
+
+cbuffer PushPerDraw
+{
+    uint drawId;
+    uint instanceOffset;
+};
+
+cbuffer SceneConsts
+{
+    float4x4 viewProj;
+    float3   cameraPos;
+    float    nearZ;
+};
+
+cbuffer MaterialConsts
+{
+    float3 albedo;
+    float  roughness;
+    float  metallic;
+};
+
+srinput ForwardPass
+{
+    [push_constant]
+    PushPerDraw m_PerDraw;
+
+    SceneConsts    m_Scene;
+    MaterialConsts m_Material;
+
+    Texture2D<float4>          m_AlbedoTex;
+    Texture2D<float4>          m_NormalTex;
+    RWTexture2D<float4>        m_Output;
+    SamplerState               m_LinearSampler;
+};

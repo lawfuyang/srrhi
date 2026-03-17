@@ -724,9 +724,38 @@ struct Parser
                 SrInputDef srInputDef;
                 srInputDef.m_Name = srInputName.m_Text;
                 std::unordered_set<std::string> srInputMemberNames;
+                int pushConstantCount = 0; // enforce max one [push_constant] per srinput
 
                 while (!Check(TokKind::RBrace) && !Check(TokKind::Eof))
                 {
+                    // ---- Attribute annotation: [push_constant] ----
+                    bool bNextIsPushConstant = false;
+                    if (Check(TokKind::LBracket))
+                    {
+                        int attrLine = m_Cur.m_Line;
+                        Advance(); // consume '['
+                        if (m_Cur.m_Kind != TokKind::Ident || m_Cur.m_Text != "push_constant")
+                        {
+                            LogMsg("[parser] ERROR: unknown attribute '%s' in srinput at line %d\n",
+                                   m_Cur.m_Text.c_str(), attrLine);
+                            throw std::runtime_error(m_FilePath + ":" + std::to_string(attrLine) +
+                                                     ": unknown attribute '" + m_Cur.m_Text +
+                                                     "'; only '[push_constant]' is supported in srinput scope");
+                        }
+                        Advance(); // consume 'push_constant'
+                        Expect(TokKind::RBracket, "]");
+
+                        if (++pushConstantCount > 1)
+                        {
+                            LogMsg("[parser] ERROR: multiple [push_constant] members in srinput '%s' at line %d\n",
+                                   srInputDef.m_Name.c_str(), attrLine);
+                            throw std::runtime_error(m_FilePath + ":" + std::to_string(attrLine) +
+                                                     ": srinput '" + srInputDef.m_Name +
+                                                     "' has more than one [push_constant] member; only one is allowed");
+                        }
+                        bNextIsPushConstant = true;
+                    }
+
                     // Expect: typeName [<templateArg>] memberName;
                     if (m_Cur.m_Kind != TokKind::Ident)
                         throw std::runtime_error(m_FilePath + ":" + std::to_string(m_Cur.m_Line) +
@@ -925,6 +954,15 @@ struct Parser
 
                     if (bIsSampler)
                     {
+                        if (bNextIsPushConstant)
+                        {
+                            LogMsg("[parser] ERROR: [push_constant] cannot be applied to sampler member in srinput '%s' at line %d\n",
+                                   srInputDef.m_Name.c_str(), typeName.m_Line);
+                            throw std::runtime_error(m_FilePath + ":" + std::to_string(typeName.m_Line) +
+                                                     ": [push_constant] attribute cannot be applied to sampler member '" +
+                                                     typeName.m_Text + "'; it is only valid on cbuffer members");
+                        }
+
                         // ---- Sampler member ----
                         Token memberName = Expect(TokKind::Ident, "member name in srinput");
                         Expect(TokKind::Semicolon, ";");
@@ -955,6 +993,15 @@ struct Parser
 
                     if (bIsResource)
                     {
+                        if (bNextIsPushConstant)
+                        {
+                            LogMsg("[parser] ERROR: [push_constant] cannot be applied to resource member in srinput '%s' at line %d\n",
+                                   srInputDef.m_Name.c_str(), typeName.m_Line);
+                            throw std::runtime_error(m_FilePath + ":" + std::to_string(typeName.m_Line) +
+                                                     ": [push_constant] attribute cannot be applied to resource member '" +
+                                                     typeName.m_Text + "'; it is only valid on cbuffer members");
+                        }
+
                         // ---- Resource member ----
                         // Types that never take a template arg:
                         bool bNoTemplateArg =
@@ -1062,9 +1109,20 @@ struct Parser
                                                      "' in srinput '" + srInputDef.m_Name + "'");
                         }
 
+                        if (bNextIsPushConstant && !srInputDef.m_Members.empty())
+                        {
+                            LogMsg("[parser] ERROR: [push_constant] member '%s' is not the first cbuffer in srinput '%s' at line %d\n",
+                                   memberName.m_Text.c_str(), srInputDef.m_Name.c_str(), memberName.m_Line);
+                            throw std::runtime_error(m_FilePath + ":" + std::to_string(memberName.m_Line) +
+                                                     ": [push_constant] member '" + memberName.m_Text +
+                                                     "' must be the first cbuffer declared in srinput '" +
+                                                     srInputDef.m_Name + "' (it always occupies register b0)");
+                        }
+
                         SrInputMember member;
-                        member.m_CBufferName = typeName.m_Text;
-                        member.m_MemberName  = memberName.m_Text;
+                        member.m_CBufferName    = typeName.m_Text;
+                        member.m_MemberName     = memberName.m_Text;
+                        member.m_bIsPushConstant = bNextIsPushConstant;
                         srInputDef.m_Members.push_back(std::move(member));
                     }
                 }

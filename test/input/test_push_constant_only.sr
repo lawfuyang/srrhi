@@ -1,0 +1,14 @@
+// Push constant only: srinput containing only a [push_constant] member.
+// No other cbuffers. Tests that a standalone push constant is valid.
+
+cbuffer PushOnly
+{
+    float3 pushVec;
+    float  pushScalar;
+};
+
+srinput SoloInput
+{
+    [push_constant]
+    PushOnly m_Push;
+};

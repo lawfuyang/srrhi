@@ -1,0 +1,22 @@
+// EXPECTED TO FAIL: [push_constant] member is not the first cbuffer in the srinput.
+// Push constants always occupy register b0 via sequential counter assignment,
+// so they must be declared before any other cbuffer member.
+
+cbuffer FrameData
+{
+    float4x4 viewProj;
+    float    time;
+};
+
+cbuffer PushData
+{
+    float smallData;
+};
+
+srinput BadOrderInputs
+{
+    FrameData m_Frame;
+
+    [push_constant]
+    PushData m_Push;   // ERROR: b0 is already taken by m_Frame (b0)
+};

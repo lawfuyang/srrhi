@@ -614,7 +614,9 @@ std::string GenerateCpp(const ParseResult& pr,
 
         out << "struct " << srInputDef.m_Name << "\n{\n";
 
-        // CBuffer counts and register indices (b# registers, local per scope)
+        // CBuffer counts and register indices (b# registers, local per scope).
+        // All cbuffers (push constant or regular) use a sequential counter starting at 0.
+        // Push constants must be declared first in the srinput, so they always land on b0.
         out << "    static constexpr uint32_t NumCBuffers = "
             << srInputDef.m_Members.size() << ";\n";
         {
@@ -623,7 +625,10 @@ std::string GenerateCpp(const ParseResult& pr,
             {
                 const std::string constName = CleanMemberName(member.m_MemberName) + "RegisterIndex";
                 out << "    static constexpr uint32_t " << constName << " = "
-                    << cbufReg++ << ";  // b" << (cbufReg - 1) << "\n";
+                    << cbufReg << ";  // b" << cbufReg;
+                if (member.m_bIsPushConstant) out << " (push constant)";
+                out << "\n";
+                ++cbufReg;
             }
         }
 
@@ -719,8 +724,11 @@ std::string GenerateCpp(const ParseResult& pr,
                 for (const auto& member : srInputDef.m_Members)
                 {
                     const std::string constName = CleanMemberName(member.m_MemberName) + "RegisterIndex";
+                    const std::string resType = member.m_bIsPushConstant
+                        ? "srrhi::ResourceType::PushConstants"
+                        : "srrhi::ResourceType::ConstantBuffer";
                     out << "        { nullptr, " << constName
-                        << ", srrhi::ResourceType::ConstantBuffer },\n";
+                        << ", " << resType << " },\n";
                 }
             }
 
@@ -772,8 +780,19 @@ std::string GenerateCpp(const ParseResult& pr,
             for (const auto& member : srInputDef.m_Members)
             {
                 const std::string setterName = "Set" + CleanMemberName(member.m_MemberName);
-                out << "    void " << setterName << "(void* pResource)"
-                    << " { m_Resources[" << resourceIdx << "].pResource = pResource; }\n";
+                if (member.m_bIsPushConstant)
+                {
+                    // Push constant setter: stores a pointer to the push constant bytes.
+                    // NOTE: This stores only a pointer — make sure the pointed-to data
+                    // does not go out of scope before the GPU finishes using it.
+                    out << "    void " << setterName << "(void* pushConstantsBytes)"
+                        << " { m_Resources[" << resourceIdx << "].pResource = pushConstantsBytes; }\n";
+                }
+                else
+                {
+                    out << "    void " << setterName << "(void* pResource)"
+                        << " { m_Resources[" << resourceIdx << "].pResource = pResource; }\n";
+                }
                 ++resourceIdx;
             }
 
@@ -896,7 +915,9 @@ std::string GenerateCpp(const ParseResult& pr,
                 {
                     const std::string constName = CleanMemberName(member.m_MemberName) + "RegisterIndex";
                     out << "static_assert(" << srInputDef.m_Name << "::" << constName
-                        << " == " << cbufReg++ << "u);\n";
+                        << " == " << cbufReg++ << "u);";
+                    if (member.m_bIsPushConstant) out << "  // push constant, always b0";
+                    out << "\n";
                 }
             }
 

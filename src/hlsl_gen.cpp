@@ -163,10 +163,12 @@ static void EmitWrappedCBufferHlsl(std::ostringstream& out,
                                    const StructType& cbufferDef,
                                    const LayoutMember& layout,
                                    int registerNum,
+                                   int spaceNum,
                                    const std::string& varName,
                                    int& padCount)
 {
-    out << "cbuffer " << cbufferDef.m_Name << " : register(b" << registerNum << ")\n{\n";
+    out << "cbuffer " << cbufferDef.m_Name << " : register(b" << registerNum
+        << ", space" << spaceNum << ")\n{\n";
 
     // Variable name: {SrInputName}_{CleanedMemberName}
     out << "    " << cbufferDef.m_Name << " " << varName << ";\n";
@@ -219,7 +221,8 @@ std::string GenerateHlsl(const ParseResult& pr,
     }
 
     // Emit cbuffers that are in srinput scopes.
-    // Register numbers are allocated globally across all srinput scopes.
+    // Register numbers are local to each srinput scope (reset per srinput).
+    // All register types (b, t, u, s) are unique within an srinput scope only.
     // Track per-srinput cbuffer info for namespace getter emission.
     struct CbufInfo
     {
@@ -231,9 +234,10 @@ std::string GenerateHlsl(const ParseResult& pr,
     std::vector<CbufInfo> allCbufInfos;
 
     LogMsg("[hlsl_gen]   Emitting cbuffers with register bindings...\n");
-    int globalRegNum = 0;
+    int srInputIdx = 0;  // register space index — one space per srinput
     for (const auto& srInputDef : pr.m_SrInputDefs)
     {
+        int regNum = 0;  // b# counter: local to this srinput scope, advances for every cbuffer
         for (const auto& member : srInputDef.m_Members)
         {
             const std::string cleanedMemberName = CleanMemberName(member.m_MemberName);
@@ -265,21 +269,27 @@ std::string GenerateHlsl(const ParseResult& pr,
                 if (correspondingLayout)
                 {
                     int localPadCount = 0;
+                    // All cbuffers use sequential per-srinput counter; each srinput
+                    // has its own register space so they never collide across srinputs.
                     EmitWrappedCBufferHlsl(out, *bufDef, *correspondingLayout,
-                                          globalRegNum, varName, localPadCount);
+                                          regNum, srInputIdx, varName, localPadCount);
                 }
 
                 allCbufInfos.push_back({srInputDef.m_Name, cleanedMemberName,
                                         varName, member.m_CBufferName});
             }
 
-            ++globalRegNum;
+            // Always advance — push constants occupy b0 and advance to b1, etc.
+            ++regNum;
         }
+        ++srInputIdx;
     }
 
     // Emit per-srinput resource declarations (SRV/UAV globals with register bindings).
     // SRV and UAV register counters are local to each srinput scope (reset per scope).
+    // Each srinput uses its own register space (spaceN) to avoid cross-srinput collisions.
     LogMsg("[hlsl_gen]   Emitting resource declarations...\n");
+    srInputIdx = 0;
     for (const auto& srInputDef : pr.m_SrInputDefs)
     {
         int srvReg = 0;
@@ -291,14 +301,17 @@ std::string GenerateHlsl(const ParseResult& pr,
             bool bUAV = IsUAV(rm.m_Kind);
             int regNum = bUAV ? uavReg++ : srvReg++;
             out << rm.m_TypeName << " " << globalVarName
-                << " : register(" << (bUAV ? "u" : "t") << regNum << ");\n";
+                << " : register(" << (bUAV ? "u" : "t") << regNum
+                << ", space" << srInputIdx << ");\n";
         }
         if (!srInputDef.m_Resources.empty())
             out << "\n";
+        ++srInputIdx;
     }
 
     // Emit per-srinput sampler declarations (s# registers, local per scope).
     LogMsg("[hlsl_gen]   Emitting sampler declarations...\n");
+    srInputIdx = 0;
     for (const auto& srInputDef : pr.m_SrInputDefs)
     {
         int samplerReg = 0;
@@ -307,10 +320,11 @@ std::string GenerateHlsl(const ParseResult& pr,
             const std::string cleanedName = CleanMemberName(sm.m_MemberName);
             const std::string globalVarName = srInputDef.m_Name + "_" + cleanedName;
             out << sm.m_TypeName << " " << globalVarName
-                << " : register(s" << samplerReg++ << ");\n";
+                << " : register(s" << samplerReg++ << ", space" << srInputIdx << ");\n";
         }
         if (!srInputDef.m_Samplers.empty())
             out << "\n";
+        ++srInputIdx;
     }
 
     // Emit per-srinput namespaces with getter functions

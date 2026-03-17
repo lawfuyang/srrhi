@@ -1,4 +1,6 @@
 ﻿#include "types.h"
+#include <stdexcept>
+#include <string>
 
 // ---------------------------------------------------------------------------
 // CBuffer layout algorithm
@@ -148,5 +150,35 @@ std::vector<LayoutMember> ComputeLayouts(ParseResult& pr)
     }
 
     LogMsg("[layout] Done\n");
+
+    // Validate push constant sizes after all layouts are computed.
+    // D3D12 push constants (root constants) must be < 256 bytes.
+    for (const auto& srInputDef : pr.m_SrInputDefs)
+    {
+        for (const auto& member : srInputDef.m_Members)
+        {
+            if (!member.m_bIsPushConstant) continue;
+            for (const auto& lm : result)
+            {
+                if (lm.m_Name == member.m_CBufferName)
+                {
+                    if (lm.m_Size >= 256)
+                    {
+                        LogMsg("[layout] ERROR: push constant '%s' in srinput '%s' is %d bytes"
+                               " (padded); must be < 256 bytes\n",
+                               member.m_CBufferName.c_str(),
+                               srInputDef.m_Name.c_str(), lm.m_Size);
+                        throw std::runtime_error(
+                            "push constant '" + member.m_CBufferName +
+                            "' in srinput '" + srInputDef.m_Name +
+                            "' has padded byte size " + std::to_string(lm.m_Size) +
+                            " which must be < 256 bytes");
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
     return result;
 }

@@ -1,0 +1,14 @@
+// EXPECTED TO FAIL: push constant cbuffer is exactly 256 bytes (must be < 256).
+// float4[16] in cbuffer layout = 16 elements × 16 bytes = 256 bytes total.
+// This must throw an error.
+
+cbuffer BigPush
+{
+    float4 data[16];
+};
+
+srinput BigPushInput
+{
+    [push_constant]
+    BigPush m_BigPush;
+};
