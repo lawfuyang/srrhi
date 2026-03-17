@@ -1,0 +1,13 @@
+// Error test: [space(N)] applied before 'cbuffer' instead of 'srinput'.
+// Should fail with: '[space(N)]' attribute can only be applied to 'srinput' declarations
+
+cbuffer FrameConsts
+{
+    float Time;
+};
+
+[space(1)]
+cbuffer PostConsts
+{
+    float Exposure;
+};

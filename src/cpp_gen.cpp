@@ -704,6 +704,9 @@ std::string GenerateCpp(const ParseResult& pr,
         const uint32_t numResources = numCBuffers + numSRVs + numUAVs + numSamplers;
         out << "    static constexpr uint32_t NumResources = NumCBuffers + NumSRVs + NumUAVs + NumSamplers;\n";
 
+        // Register space
+        out << "    static constexpr uint32_t RegisterSpace = " << std::max(0, srInputDef.m_RegisterSpace) << ";\n";
+
         // Compose cbuffer structs directly as member variables
         if (!srInputDef.m_Members.empty())
         {
@@ -968,6 +971,9 @@ std::string GenerateCpp(const ParseResult& pr,
 
             out << "static_assert(" << srInputDef.m_Name << "::NumResources == "
                 << numResources << "u);\n";
+
+            out << "static_assert(" << srInputDef.m_Name << "::RegisterSpace == "
+                << std::max(0, srInputDef.m_RegisterSpace) << "u);\n";
         }  // if (bEmitValidation)
 
         out << "\n";

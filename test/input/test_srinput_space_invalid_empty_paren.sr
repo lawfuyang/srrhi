@@ -1,0 +1,13 @@
+// Error test: [space()] with no value inside the parentheses.
+// Should fail with: expected integer (during ParseInteger, sees ')' instead of number)
+
+cbuffer FrameConsts
+{
+    float Time;
+};
+
+[space()]
+srinput BadInputs
+{
+    FrameConsts m_Frame;
+};

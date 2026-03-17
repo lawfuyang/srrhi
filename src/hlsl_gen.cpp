@@ -158,16 +158,20 @@ static void EmitStructHlsl(std::ostringstream& out, const StructType& st,
 // ---------------------------------------------------------------------------
 // Emit wrapped cbuffer for srinput member (HLSL)
 // varName = "{SrInputName}_{CleanedMemberName}", e.g. "MainInputs_Scene"
+// registerSpace = -1 means no space qualifier is emitted
 // ---------------------------------------------------------------------------
 static void EmitWrappedCBufferHlsl(std::ostringstream& out,
                                    const StructType& cbufferDef,
                                    const LayoutMember& layout,
                                    int registerNum,
                                    const std::string& varName,
+                                   int registerSpace,
                                    int& padCount)
 {
-    out << "cbuffer " << cbufferDef.m_Name << " : register(b" << registerNum
-        << ")\n{\n";
+    out << "cbuffer " << cbufferDef.m_Name << " : register(b" << registerNum;
+    if (registerSpace >= 0)
+        out << ", space" << registerSpace;
+    out << ")\n{\n";
 
     // Variable name: {SrInputName}_{CleanedMemberName}
     out << "    " << cbufferDef.m_Name << " " << varName << ";\n";
@@ -269,9 +273,8 @@ std::string GenerateHlsl(const ParseResult& pr,
                 if (correspondingLayout)
                 {
                     int localPadCount = 0;
-                    // All srinputs use space0 — only one srinput is used per dispatch.
                     EmitWrappedCBufferHlsl(out, *bufDef, *correspondingLayout,
-                                          regNum, varName, localPadCount);
+                                          regNum, varName, srInputDef.m_RegisterSpace, localPadCount);
                 }
 
                 allCbufInfos.push_back({srInputDef.m_Name, cleanedMemberName,
@@ -285,7 +288,6 @@ std::string GenerateHlsl(const ParseResult& pr,
 
     // Emit per-srinput resource declarations (SRV/UAV globals with register bindings).
     // SRV and UAV register counters are local to each srinput scope (reset per scope).
-    // All srinputs use space0 — only one srinput is active per shader dispatch.
     LogMsg("[hlsl_gen]   Emitting resource declarations...\n");
     for (const auto& srInputDef : pr.m_SrInputDefs)
     {
@@ -298,15 +300,16 @@ std::string GenerateHlsl(const ParseResult& pr,
             bool bUAV = IsUAV(rm.m_Kind);
             int regNum = bUAV ? uavReg++ : srvReg++;
             out << rm.m_TypeName << " " << globalVarName
-                << " : register(" << (bUAV ? "u" : "t") << regNum
-                << ");\n";
+                << " : register(" << (bUAV ? "u" : "t") << regNum;
+            if (srInputDef.m_RegisterSpace >= 0)
+                out << ", space" << srInputDef.m_RegisterSpace;
+            out << ");\n";
         }
         if (!srInputDef.m_Resources.empty())
             out << "\n";
     }
 
     // Emit per-srinput sampler declarations (s# registers, local per scope).
-    // All srinputs use space0 — only one srinput is active per shader dispatch.
     LogMsg("[hlsl_gen]   Emitting sampler declarations...\n");
     for (const auto& srInputDef : pr.m_SrInputDefs)
     {
@@ -316,7 +319,10 @@ std::string GenerateHlsl(const ParseResult& pr,
             const std::string cleanedName = CleanMemberName(sm.m_MemberName);
             const std::string globalVarName = srInputDef.m_Name + "_" + cleanedName;
             out << sm.m_TypeName << " " << globalVarName
-                << " : register(s" << samplerReg++ << ");\n";
+                << " : register(s" << samplerReg++;
+            if (srInputDef.m_RegisterSpace >= 0)
+                out << ", space" << srInputDef.m_RegisterSpace;
+            out << ");\n";
         }
         if (!srInputDef.m_Samplers.empty())
             out << "\n";

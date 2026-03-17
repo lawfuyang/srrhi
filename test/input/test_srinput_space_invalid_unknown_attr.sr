@@ -1,0 +1,13 @@
+// Error test: unknown top-level attribute (not 'space').
+// Should fail with: unknown top-level attribute 'material'; only '[space(N)]' is supported before 'srinput'
+
+cbuffer FrameConsts
+{
+    float Time;
+};
+
+[material]
+srinput BadInputs
+{
+    FrameConsts m_Frame;
+};

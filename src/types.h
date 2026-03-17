@@ -183,15 +183,17 @@ struct ScalarConst
 // ---------------------------------------------------------------------------
 // SrInputDef: srinput scope containing cbuffer references, resource members,
 //             sampler members, and scalar constants.
-//   m_Name         – name of the srinput scope
-//   m_Members      – list of cbuffer references, order determines register assignment
-//   m_Resources    – list of SRV/UAV resource members, order determines t#/u# assignment
-//   m_Samplers     – list of sampler members, order determines s# register assignment
-//   m_ScalarConsts – list of scalar compile-time constants
+//   m_Name          – name of the srinput scope
+//   m_RegisterSpace – register space index from [space(N)] attribute; -1 = not specified
+//   m_Members       – list of cbuffer references, order determines register assignment
+//   m_Resources     – list of SRV/UAV resource members, order determines t#/u# assignment
+//   m_Samplers      – list of sampler members, order determines s# register assignment
+//   m_ScalarConsts  – list of scalar compile-time constants
 // ---------------------------------------------------------------------------
 struct SrInputDef
 {
     std::string                 m_Name;
+    int                         m_RegisterSpace = -1;  // -1 = no [space(N)] attribute
     std::vector<SrInputMember>  m_Members;
     std::vector<ResourceMember> m_Resources;
     std::vector<SamplerMember>  m_Samplers;

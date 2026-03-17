@@ -78,6 +78,12 @@ static const std::unordered_set<std::string> k_ExpectedFailStems = {
     "test_push_constant_on_resource",
     "test_push_constant_on_sampler",
     "test_push_constant_not_first",
+    // Register space error tests
+    "test_srinput_space_invalid_on_cbuffer",
+    "test_srinput_space_invalid_no_paren",
+    "test_srinput_space_invalid_unknown_attr",
+    "test_srinput_space_invalid_negative",
+    "test_srinput_space_invalid_empty_paren",
 };
 
 // ---------------------------------------------------------------------------

@@ -1,0 +1,18 @@
+// Positive test: [space(0)] explicitly specifies space0 (which is HLSL's default).
+// Even though space0 is the default in HLSL, the attribute should still emit it explicitly.
+// Expected HLSL output: register(b0, space0)
+// Expected C++ output: static constexpr uint32_t RegisterSpace = 0;
+
+cbuffer GlobalConsts
+{
+    float Time;
+    float DeltaTime;
+    uint  FrameIndex;
+};
+
+[space(0)]
+srinput GlobalInputs
+{
+    GlobalConsts m_Global;
+    Texture2D<float4> m_EnvMap;
+};

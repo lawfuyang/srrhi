@@ -1,0 +1,31 @@
+// Positive test: mix of srinputs — one with an explicit [space(N)], one without.
+// The one without should NOT emit any space qualifier in HLSL.
+// Expected HLSL:
+//   SpaceInputs:   register(b0, space5), register(t0, space5)
+//   NoSpaceInputs: register(b0), register(s0)  (no space suffix)
+// Expected C++:
+//   SpaceInputs has RegisterSpace = 5; NoSpaceInputs has no RegisterSpace member.
+
+cbuffer SceneConsts
+{
+    float4x4 m_View;
+    float4x4 m_Proj;
+};
+
+cbuffer ShadowConsts
+{
+    float4x4 m_LightViewProj;
+};
+
+[space(5)]
+srinput SpaceInputs
+{
+    SceneConsts       m_Scene;
+    Texture2D<float>  m_ShadowMap;
+};
+
+srinput NoSpaceInputs
+{
+    ShadowConsts m_Shadow;
+    SamplerComparisonState m_CmpSampler;
+};

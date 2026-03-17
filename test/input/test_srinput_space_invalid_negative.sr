@@ -1,0 +1,14 @@
+// Error test: [space(-1)] — negative register space value.
+// The '-' is not a valid integer token; ParseInteger expects TokKind::Number.
+// Should fail with: expected integer (during ParseInteger)
+
+cbuffer FrameConsts
+{
+    float Time;
+};
+
+[space(-1)]
+srinput BadInputs
+{
+    FrameConsts m_Frame;
+};

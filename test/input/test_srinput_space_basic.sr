@@ -1,0 +1,21 @@
+// Positive test: [space(N)] attribute specifying an explicit register space on srinput.
+// Expected HLSL output: register(b0, space1), register(b1, space1)
+// Expected C++  output: static constexpr uint32_t RegisterSpace = 1;
+
+cbuffer FrameConsts
+{
+    float4x4 m_ViewProj;
+    float    m_Time;
+};
+
+cbuffer PassConsts
+{
+    uint m_PassIdx;
+};
+
+[space(1)]
+srinput BasePassInputs
+{
+    FrameConsts m_FrameConsts;
+    PassConsts  m_PassConsts;
+};

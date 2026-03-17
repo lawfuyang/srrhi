@@ -614,6 +614,36 @@ struct Parser
                 continue;
             }
 
+            // ---- Optional [space(N)] attribute before 'srinput' ----
+            int pendingRegisterSpace = -1;
+            if (Check(TokKind::LBracket))
+            {
+                int attrLine = m_Cur.m_Line;
+                Advance(); // consume '['
+                if (m_Cur.m_Kind != TokKind::Ident || m_Cur.m_Text != "space")
+                {
+                    LogMsg("[parser] ERROR: unknown top-level attribute '%s' at line %d\n",
+                           m_Cur.m_Text.c_str(), attrLine);
+                    throw std::runtime_error(m_FilePath + ":" + std::to_string(attrLine) +
+                                             ": unknown top-level attribute '" + m_Cur.m_Text +
+                                             "'; only '[space(N)]' is supported before 'srinput'");
+                }
+                Advance(); // consume 'space'
+                if (m_Cur.m_Kind != TokKind::Unknown || m_Cur.m_Text != "(")
+                    throw std::runtime_error(m_FilePath + ":" + std::to_string(attrLine) +
+                                             ": expected '(' after 'space' in '[space(N)]' attribute");
+                Advance(); // consume '('
+                pendingRegisterSpace = ParseInteger();
+                if (m_Cur.m_Kind != TokKind::Unknown || m_Cur.m_Text != ")")
+                    throw std::runtime_error(m_FilePath + ":" + std::to_string(attrLine) +
+                                             ": expected ')' in '[space(N)]' attribute");
+                Advance(); // consume ')'
+                Expect(TokKind::RBracket, "]");
+                if (m_Cur.m_Kind != TokKind::Ident || m_Cur.m_Text != "srinput")
+                    throw std::runtime_error(m_FilePath + ":" + std::to_string(attrLine) +
+                                             ": '[space(N)]' attribute can only be applied to 'srinput' declarations");
+            }
+
             if (m_Cur.m_Kind != TokKind::Ident) { Advance(); continue; }
 
             std::string kw = m_Cur.m_Text;
@@ -722,7 +752,8 @@ struct Parser
                 Expect(TokKind::LBrace, "{");
 
                 SrInputDef srInputDef;
-                srInputDef.m_Name = srInputName.m_Text;
+                srInputDef.m_Name          = srInputName.m_Text;
+                srInputDef.m_RegisterSpace = pendingRegisterSpace;
                 std::unordered_set<std::string> srInputMemberNames;
                 int pushConstantCount = 0; // enforce max one [push_constant] per srinput
 

@@ -1,0 +1,20 @@
+// Positive test: [space(N)] on srinput with SRV/UAV resources and a sampler.
+// Expected HLSL output: register(t0, space3), register(u0, space3), register(s0, space3)
+// Expected C++ output: static constexpr uint32_t RegisterSpace = 3;
+
+cbuffer MaterialConsts
+{
+    float3 Albedo;
+    float  Metallic;
+    float  Roughness;
+};
+
+[space(3)]
+srinput MaterialPass
+{
+    MaterialConsts        m_Material;
+    Texture2D<float4>     m_AlbedoMap;
+    Texture2D<float>      m_RoughnessMap;
+    RWStructuredBuffer<uint> m_DrawCounter;
+    SamplerState          m_LinearSampler;
+};

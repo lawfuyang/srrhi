@@ -1,0 +1,13 @@
+// Error test: [space] without the required (N) argument parentheses.
+// Should fail with: expected '(' after 'space' in '[space(N)]' attribute
+
+cbuffer FrameConsts
+{
+    float Time;
+};
+
+[space]
+srinput BadInputs
+{
+    FrameConsts m_Frame;
+};

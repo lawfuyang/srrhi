@@ -1,0 +1,37 @@
+// Positive test: multiple srinputs each with a different explicit register space.
+// Expected HLSL output:
+//   cbuffer CameraConsts : register(b0, space1) { ... };
+//   cbuffer LightConsts  : register(b1, space1) { ... };
+//   cbuffer PostConsts   : register(b0, space2) { ... };
+
+cbuffer CameraConsts
+{
+    float3 Position;
+    float  FOV;
+};
+
+cbuffer LightConsts
+{
+    float3 Direction;
+    float  Intensity;
+};
+
+cbuffer PostConsts
+{
+    float Exposure;
+    float Contrast;
+    float Saturation;
+};
+
+[space(1)]
+srinput MainPassInputs
+{
+    CameraConsts m_Camera;
+    LightConsts  m_Light;
+};
+
+[space(2)]
+srinput PostPassInputs
+{
+    PostConsts m_Post;
+};
