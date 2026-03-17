@@ -66,6 +66,60 @@ srinput RenderInputs
 };
 ```
 
+**`[space(N)]` register space attribute** — optionally specify an explicit HLSL register space for an `srinput` scope. By default, register spaces are not emitted in HLSL (`space0` is implicit). This is useful when:
+
+- Binding different shader passes that share resource layouts but need to operate independently within a single shader (e.g., deferred rendering multiple passes in one shader).
+- Organizing large shaders into logical groups that have separate descriptor heaps or descriptor tables.
+- Preventing register number collisions when multiple independent `srinput` scopes are active.
+
+Without `[space(N)]`, all srinputs share `space0` (HLSL default) and register numbers reset per scope. With `[space(N)]`, that specific srinput and all its resources are bound to the given space.
+
+```hlsl
+cbuffer MainSceneConsts
+{
+    float4x4 viewProj;
+    float3   cameraPos;
+};
+
+cbuffer PostSceneConsts
+{
+    float exposure;
+    float contrast;
+};
+
+// Space 1: resources for main pass
+[space(1)]
+srinput MainPass
+{
+    MainSceneConsts m_Main;      // register(b0, space1)
+    Texture2D<float4> m_Albedo;  // register(t0, space1)
+};
+
+// Space 2: resources for post-processing pass
+[space(2)]
+srinput PostPass
+{
+    PostSceneConsts m_Post;      // register(b0, space2)
+    Texture2D<float4> m_Result;  // register(t0, space2)
+};
+```
+
+In the generated C++ header, the `RegisterSpace` constant is only emitted when `[space(N)]` is specified:
+
+```cpp
+struct MainPass
+{
+    static constexpr uint32_t RegisterSpace = 1;
+    // ... register index constants, resource array, setters ...
+};
+
+struct PostPass
+{
+    static constexpr uint32_t RegisterSpace = 2;
+    // ... register index constants, resource array, setters ...
+};
+```
+
 ---
 
 ### Generated C++ Headers (`output/cpp/<name>.h`)
@@ -82,6 +136,7 @@ Each `.sr` file produces a C++ header inside `srrhi` namespace containing:
 - **`srinput` structs** — plain structs that hold:
   - The cbuffer class instances as data members.
   - `static constexpr uint32_t` register index constants (`FrameRegisterIndex`, `NumCBuffers`, `NumSRVs`, `NumUAVs`, `NumSamplers`, `NumResources`, …).
+  - **`RegisterSpace`** — emitted only if the `srinput` was decorated with `[space(N)]`. Contains the register space index as a compile-time constant.
   - Scalar constants as `static constexpr` members.
   - A flat `srrhi::ResourceEntry m_Resources[NumResources]` array with compile-time `slot` and `type` fields, ordered: CBuffers → SRVs → UAVs → Samplers.
   - Typed `Set*()` resource setters that write into `m_Resources`:
@@ -175,3 +230,167 @@ srrhi -i shaders/sr -o generated --test --gen-validation
 Also writes `generated/cpp/validation_<name>.cpp` stubs that can be compiled as a quick smoke-test.
 
 Register indices are assigned in declaration order within each `srinput` scope. CBuffers start at `b0`, SRVs at `t0`, UAVs at `u0`, and samplers at `s0` — each counter resets per `srinput` scope.
+
+---
+
+## Examples & Patterns
+
+### Multi-Pass Shader with Register Spaces
+
+A common pattern is to implement multiple rendering passes in a single shader, each with its own set of constant buffers and resources. Using `[space(N)]` prevents register number collisions:
+
+**`render_passes.sr`:**
+```hlsl
+// Shared structures
+struct SceneData {
+    float4x4 viewProj;
+    float3 cameraPos;
+    float padding;
+};
+
+struct MaterialData {
+    float3 albedo;
+    float roughness;
+    float3 normal;
+    float metallic;
+};
+
+struct PostProcessData {
+    float exposure;
+    float saturation;
+    float contrast;
+};
+
+cbuffer SceneConsts { SceneData scene; };
+cbuffer MaterialConsts { MaterialData material; };
+cbuffer PostConsts { PostProcessData post; };
+
+// ==== Space 0: Forward Rendering Pass ====
+srinput ForwardPass
+{
+    SceneConsts       m_Scene;       // b0
+    MaterialConsts    m_Material;    // b1
+    Texture2D<float4> m_Albedo;      // t0
+    Texture2D<float4> m_Normal;      // t1
+    SamplerState      m_Linear;      // s0
+};
+
+// ==== Space 1: Deferred G-Buffer Write ====
+[space(1)]
+srinput GBufferPass
+{
+    SceneConsts         m_Scene;     // b0, space1
+    RWTexture2D<float4> m_Albedo;    // u0, space1
+    RWTexture2D<float2> m_Normal;    // u1, space1
+};
+
+// ==== Space 2: Post-Processing ====
+[space(2)]
+srinput PostPass
+{
+    PostConsts        m_Post;        // b0, space2
+    Texture2D<float4> m_Input;       // t0, space2
+    RWTexture2D<float4> m_Output;    // u0, space2
+    SamplerState      m_Point;       // s0, space2
+};
+```
+
+**C++ usage:**
+```cpp
+#include "render_passes.h"
+
+using namespace srrhi;
+
+// Instantiate each pass's resources
+ForwardPass fwd;
+GBufferPass gbuffer;
+PostPass post;
+
+// Set ForwardPass resources (space 0)
+fwd.m_Scene.SetViewProj(/* insert view proj matrix here */);
+fwd.SetMaterial(&materialBuffer);
+fwd.SetAlbedo(&albedoTexture);
+fwd.SetNormal(&normalTexture);
+fwd.SetLinear(&linearSampler);
+
+...
+```
+
+**HLSL shader:**
+```hlsl
+#include "render_passes.hlsli"
+
+// Use GetXXX() accessors from appropriate namespaces
+SceneConsts g_SceneConst = ForwardPass::GetSceneConsts();
+Texture2D<float4> g_Albedo = ForwardPass::GetAlbedo();
+
+...
+```
+
+### Organizing Large Shaders with Multiple Srinputs
+
+When a single shader composes several independent rendering tasks (e.g., a full deferred pipeline with multiple lighting passes), use register spaces to organize resources into logical groups:
+
+```hlsl
+// Lighting pass 1: Point lights
+[space(3)]
+srinput PointLightPass
+{
+    PointLightConsts m_Lights;      // b0, space3
+    Texture2D<float4> m_Position;   // t0, space3 (GBuffer)
+    Texture2D<float4> m_Normal;     // t1, space3 (GBuffer)
+    RWTexture2D<float4> m_Lighting; // u0, space3
+};
+
+// Lighting pass 2: Directional light with shadows
+[space(4)]
+srinput DirectionalLightPass
+{
+    DirectionalLightConsts m_Light; // b0, space4
+    Texture2D<float> m_ShadowMap;   // t0, space4
+    Texture2D<float4> m_Position;   // t1, space4 (GBuffer)
+    RWTexture2D<float4> m_Lighting; // u0, space4
+    SamplerComparisonState m_ShadowSampler; // s0, space4
+};
+
+// Composition pass
+[space(5)]
+srinput CompositionPass
+{
+    CompositionConsts m_Consts;     // b0, space5
+    Texture2D<float4> m_Lighting;   // t0, space5
+    Texture2D<float4> m_Albedo;     // t1, space5
+    RWTexture2D<float4> m_Output;   // u0, space5
+};
+```
+
+This pattern makes it easy to:
+- Clearly separate resource dependencies per pass
+- Verify at compile-time (via `static_assert`) that each pass has the expected register space
+- Organize descriptor heap / descriptor table construction in C++ by iterating over spaces
+- Understand shader logic by seeing which `srinput` namespace is being used
+
+### No Register Space (Default Behavior)
+
+If you don't specify `[space(N)]`, all srinputs remain in the default register space (`space0`), and no `RegisterSpace` constant is emitted:
+
+```hlsl
+// Both use space0 implicitly, but different b# and t# within space0
+srinput Pass1
+{
+    Consts1 m_C1;                // b0
+    Texture2D<float4> m_Tex1;    // t0
+};
+
+srinput Pass2
+{
+    Consts2 m_C2;                // b1 (resets after Pass1)
+    Texture2D<float4> m_Tex2;    // t1 (resets after Pass1)
+};
+```
+
+This is the right choice when:
+- Your shader only uses a single active srinput at a time
+- You're binding all resources to the default descriptor heap
+- You don't need independent resource groups with colliding register numbers
+
