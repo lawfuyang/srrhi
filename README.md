@@ -394,3 +394,347 @@ This is the right choice when:
 - You're binding all resources to the default descriptor heap
 - You don't need independent resource groups with colliding register numbers
 
+### Srinput Inheritance
+
+You can define srinput inheritance hierarchies where a derived srinput inherits all cbuffers, resources, samplers, and scalar constants from one or more base srinputs.
+
+**Syntax:**
+```hlsl
+srinput Derived : Base1, Base2, Base3 { ... }
+```
+
+Inheritance is useful for:
+- Building progressively more feature-complete srinputs from simpler base configurations
+- Sharing common bindings across multiple passes without duplication
+- Organizing large shaders with increasingly specialized requirements
+
+**Key behaviors:**
+- Derived srinputs inherit **all** members and resources from bases (in declaration order)
+- Flattening order: base items are prepended, then derived body items follow
+- Register indices continue sequentially: base cbuffers at b0, b1, then derived body at b2, b3, etc.
+- Register space (`[space(N)]`) is inherited from the top-level parent
+- Name clash detection: bases and body cannot have duplicate member names
+
+**Basic inheritance example:**
+
+`effects.sr`:
+```hlsl
+cbuffer FrameConsts
+{
+    float4x4 m_ViewProj;
+    float    m_Time;
+};
+
+cbuffer SceneConsts
+{
+    float3 m_SunDir;
+    float  m_Intensity;
+};
+
+srinput Base
+{
+    FrameConsts m_Frame;
+};
+
+srinput Derived : Base
+{
+    SceneConsts m_Scene;
+};
+```
+
+Generated C++ hierarchy:
+```cpp
+struct FrameConsts { /* ... */ };
+struct SceneConsts { /* ... */ };
+
+struct Base
+{
+    static constexpr uint32_t NumCBuffers = 1;
+    static constexpr uint32_t FrameRegisterIndex = 0; // b0
+    FrameConsts m_Frame;
+    srrhi::ResourceEntry m_Resources[1];
+};
+
+struct Derived
+{
+    static constexpr uint32_t NumCBuffers = 2;
+    static constexpr uint32_t FrameRegisterIndex = 0;  // b0 (inherited)
+    static constexpr uint32_t SceneRegisterIndex = 1;  // b1 (new)
+    FrameConsts m_Frame;     // inherited
+    SceneConsts m_Scene;     // own member
+    srrhi::ResourceEntry m_Resources[2];
+};
+```
+
+**HLSL usage:**
+```hlsl
+#include "effects.hlsli"
+
+// Derived automatically has both cbuffers available
+FrameConsts g_FrameConsts = Derived::GetFrameConsts();
+SceneConsts g_SceneConsts = Derived::GetSceneConsts();
+
+float4 GetLightContribution(float3 pos)
+{
+    float3 toLight = normalize(g_SceneConsts.m_SunDir);
+    return float4(g_SceneConsts.m_Intensity * dot(normalize(pos), toLight), 1.0);
+}
+```
+
+**Multiple inheritance example:**
+
+```hlsl
+cbuffer CameraConsts
+{
+    float3 m_Position;
+    float  m_FOV;
+};
+
+cbuffer LightConsts
+{
+    float3 m_Color;
+    float  m_Intensity;
+};
+
+cbuffer PostConsts
+{
+    float m_Exposure;
+    float m_Gamma;
+};
+
+srinput CameraPass
+{
+    CameraConsts m_Camera;
+    Texture2D<float4> m_AlbedoA;
+};
+
+srinput LightPass
+{
+    LightConsts  m_Light;
+    Texture2D<float4> m_AlbedoB;
+};
+
+// Inherits from both CameraPass and LightPass
+srinput CombinedPass : CameraPass, LightPass
+{
+    PostConsts m_Post;
+    RWTexture2D<float4> m_Output;
+};
+```
+
+The generated `CombinedPass` flattens in order: first `CameraPass` members (CameraConsts at b0, AlbedoA at t0), then `LightPass` members (LightConsts at b1, AlbedoB at t1), then its own body (PostConsts at b2, Output at u0).
+
+---
+
+### Srinput Composition
+
+Srinput composition allows you to nest one srinput inside another as a member, automatically flattening all nested resources into the parent. This is distinct from inheritance: you explicitly declare a nested srinput member, and it gets inlined during code generation.
+
+**Syntax:**
+```hlsl
+srinput ParentInput
+{
+    ChildInput m_Child;    // nest another srinput here
+    // ... parent's own members ...
+};
+```
+
+Composition is useful for:
+- Organizing large shaders by grouping related bindings into named units
+- Reusing predefined input sets without duplicating definitions
+- Creating flexible modular binding combinations
+- Layering resources: base pass inputs, then lighting inputs, then post-processing inputs
+
+**Key behaviors:**
+- A nested srinput member is expanded inline during flattening (DFS order)
+- Register indices continue sequentially through the nesting hierarchy
+- Each level's nested members appear in declaration order before that level's own members
+- Register space (`[space(N)]`) is determined by the top-level parent only
+- Name clash detection: nested and own members cannot have collision
+
+**Basic composition example:**
+
+`render_inputs.sr`:
+```hlsl
+cbuffer FrameConsts
+{
+    float4x4 m_ViewProj;
+    float    m_Time;
+};
+
+cbuffer PassConsts
+{
+    uint m_PassIdx;
+};
+
+cbuffer SceneConsts
+{
+    float3 m_SunDir;
+    float  m_Intensity;
+};
+
+srinput BaseInputs
+{
+    FrameConsts m_Frame;
+    PassConsts  m_Pass;
+};
+
+srinput ExtendedPass
+{
+    BaseInputs  m_Base;        // composition: nests BaseInputs
+    SceneConsts m_Scene;       // own member
+};
+```
+
+Generated register layout:
+- b0: FrameConsts (from nested BaseInputs)
+- b1: PassConsts (from nested BaseInputs)
+- b2: SceneConsts (from ExtendedPass)
+
+Generated C++:
+```cpp
+struct FrameConsts { /* ... */ };
+struct PassConsts { /* ... */ };
+struct SceneConsts { /* ... */ };
+
+struct BaseInputs
+{
+    FrameConsts m_Frame;
+    PassConsts  m_Pass;
+    srrhi::ResourceEntry m_Resources[2];
+    // ...
+};
+
+struct ExtendedPass
+{
+    static constexpr uint32_t NumCBuffers = 3;
+    static constexpr uint32_t FrameRegisterIndex = 0;   // b0 (from nested)
+    static constexpr uint32_t PassRegisterIndex = 1;    // b1 (from nested)
+    static constexpr uint32_t SceneRegisterIndex = 2;   // b2 (own)
+    
+    FrameConsts m_Frame;  // flattened from m_Base
+    PassConsts  m_Pass;   // flattened from m_Base
+    SceneConsts m_Scene;  // own member
+    srrhi::ResourceEntry m_Resources[3];
+};
+```
+
+**Deep composition (multi-level nesting):**
+
+```hlsl
+cbuffer AConsts   { float m_A; };
+cbuffer BConsts   { float m_B; };
+cbuffer CConsts   { float m_C; };
+
+srinput LevelA
+{
+    AConsts m_AConsts;
+    Texture2D<float> m_ATex;
+};
+
+srinput LevelB
+{
+    LevelA m_A;              // nests LevelA
+    BConsts m_BConsts;
+    Texture2D<float> m_BTex;
+};
+
+srinput LevelC
+{
+    LevelB m_B;              // nests LevelB (which nests LevelA)
+    CConsts m_CConsts;
+    Texture2D<float> m_CTex;
+};
+```
+
+Generated register bindings for LevelC:
+- b0: AConsts, t0: ATex (from LevelA via LevelB)
+- b1: BConsts, t1: BTex (from LevelB)
+- b2: CConsts, t2: CTex (from LevelC)
+
+**Composition with resources example:**
+
+```hlsl
+cbuffer CameraData { float4x4 viewProj; };
+cbuffer LightData   { float3 lightDir;  };
+
+srinput ShadowInputs
+{
+    Texture2D<float> m_NormalMap;
+    Texture2D<float> m_DepthRT;
+    SamplerState m_LinearSampler;
+};
+
+srinput GBufferInputs
+{
+    CameraData m_Camera;
+    Texture2D<float4> m_PositionGBuffer;
+    Texture2D<float4> m_NormalGBuffer;
+};
+
+srinput BaseLightPass
+{
+    LightData m_Light;
+    Texture2D<float4> m_Lighting;
+};
+
+srinput FullLightPass
+{
+    ShadowInputs    m_Shadows;      // b0, t0-t1, s0
+    GBufferInputs   m_GBuffer;      // b1, t2-t3
+    BaseLightPass   m_Light;        // b2, t4
+    RWTexture2D<float4> m_Output;   // u0
+};
+```
+
+All nested resources are flattened and register-numbered sequentially in the output.
+
+---
+
+### Combining Inheritance and Composition
+
+You can use both inheritance and composition in the same srinput. The flattening order is:
+1. All inherited base members (in inheritance declaration order)
+2. This srinput's own members (including composition nesting)
+
+**Combined example:**
+
+```hlsl
+cbuffer SharedFrame { float4x4 viewProj; };
+cbuffer SharedScene { float3 sunDir; };
+
+cbuffer LightData   { float3 lightColor; };
+cbuffer ShadowData  { float bias; };
+
+srinput BasePass
+{
+    SharedFrame m_Frame;
+    SharedScene m_Scene;
+};
+
+srinput LightPass
+{
+    LightData m_Light;
+};
+
+srinput ShadowPass
+{
+    ShadowData m_Shadow;
+};
+
+srinput CombinedPass : BasePass
+{
+    LightPass m_LightComp;    // composition
+    ShadowPass m_ShadowComp;  // composition
+    Texture2D<float4> m_Output;
+};
+```
+
+Register layout for `CombinedPass`:
+- b0: SharedFrame (inherited from BasePass)
+- b1: SharedScene (inherited from BasePass)
+- b2: LightData (from composed LightPass)
+- b3: ShadowData (from composed ShadowPass)
+- t0: Output
+
+---
