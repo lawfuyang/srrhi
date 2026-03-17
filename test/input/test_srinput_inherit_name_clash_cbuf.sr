@@ -1,0 +1,22 @@
+// EXPECTED TO FAIL: name clash between inherited cbuffer member and a body cbuffer member.
+// Base has 'm_Frame'; Derived body also declares 'm_Frame' -- name clash.
+
+cbuffer FrameConsts
+{
+    float4x4 m_ViewProj;
+};
+
+cbuffer OtherFrame
+{
+    float4 m_Color;
+};
+
+srinput Base
+{
+    FrameConsts m_Frame;
+};
+
+srinput Derived : Base
+{
+    OtherFrame m_Frame;  // ERROR: 'm_Frame' already inherited from Base
+};

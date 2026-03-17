@@ -1,0 +1,35 @@
+// Positive test: using optional C++ access specifiers (public/protected/private) in inheritance list.
+// The keywords are accepted and silently ignored (no access control in srinput).
+
+cbuffer FrameConsts
+{
+    float4x4 m_ViewProj;
+};
+
+cbuffer LightConsts
+{
+    float3 m_Color;
+    float  m_Intensity;
+};
+
+cbuffer SceneConsts
+{
+    float4 m_FogColor;
+};
+
+srinput Base
+{
+    FrameConsts m_Frame;
+    LightConsts m_Light;
+};
+
+// public, protected, private are all silently accepted
+srinput DerivedPublic : public Base
+{
+    SceneConsts m_Scene;
+};
+
+srinput DerivedProtected : protected Base
+{
+    SceneConsts m_Fog;   // different name from DerivedPublic; DerivedPublic not used here
+};

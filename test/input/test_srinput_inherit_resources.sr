@@ -1,0 +1,17 @@
+// Positive test: inheritance with resource members.
+// Derived inherits Base's SRV (t0), UAV (u0).
+// Derived body adds: t1, t2, u1.
+// All register indices are unique across the flattened derived srinput.
+
+srinput Base
+{
+    Texture2D<float4>      m_Albedo;
+    RWTexture2D<float4>    m_OutLum;
+};
+
+srinput Derived : Base
+{
+    Texture2D<float>       m_Depth;
+    Texture2D<float4>      m_Normal;
+    RWTexture2D<float4>    m_OutColor;
+};

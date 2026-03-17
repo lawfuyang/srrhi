@@ -46,6 +46,25 @@ inline FlatSrInput FlattenSrInput(const SrInputDef& srInput,
 {
     FlatSrInput result;
 
+    // 1. Flatten inherited bases first, in declaration order.
+    //    Inherited content is prepended before this srinput's own body items.
+    for (const auto& baseName : srInput.m_BaseInheritances)
+    {
+        for (const auto& other : allSrInputDefs)
+        {
+            if (other.m_Name == baseName)
+            {
+                FlatSrInput baseFlat = FlattenSrInput(other, allSrInputDefs);
+                for (auto& m  : baseFlat.m_Members)      result.m_Members.push_back(std::move(m));
+                for (auto& r  : baseFlat.m_Resources)    result.m_Resources.push_back(std::move(r));
+                for (auto& s  : baseFlat.m_Samplers)     result.m_Samplers.push_back(std::move(s));
+                for (auto& sc : baseFlat.m_ScalarConsts) result.m_ScalarConsts.push_back(std::move(sc));
+                break;
+            }
+        }
+    }
+
+    // 2. Then process this srinput's own body items in declaration order.
     for (const auto& item : srInput.m_BodyOrder)
     {
         switch (item.kind)

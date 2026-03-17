@@ -1,0 +1,12 @@
+// EXPECTED TO FAIL: self-inheritance.
+// An srinput cannot inherit from itself.
+
+cbuffer FrameConsts
+{
+    float4x4 m_ViewProj;
+};
+
+srinput A : A  // ERROR: 'A' cannot inherit from itself
+{
+    FrameConsts m_Frame;
+};

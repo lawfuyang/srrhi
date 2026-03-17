@@ -1,0 +1,12 @@
+// EXPECTED TO FAIL: name clash between inherited scalar const and a body scalar const.
+// Base has 'MaxLights'; Derived body also declares 'MaxLights' -- name clash.
+
+srinput Base
+{
+    static const uint MaxLights = 16;
+};
+
+srinput Derived : Base
+{
+    static const uint MaxLights = 8;  // ERROR: 'MaxLights' already inherited from Base
+};

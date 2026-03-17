@@ -194,9 +194,12 @@ struct ScalarConst
 
 // ---------------------------------------------------------------------------
 // SrInputDef: srinput scope containing cbuffer references, resource members,
-//             sampler members, scalar constants, and optionally nested srinput refs.
+//             sampler members, scalar constants, optionally nested srinput refs,
+//             and optionally a list of inherited base srinputs.
 //   m_Name            – name of the srinput scope
 //   m_RegisterSpace   – register space index from [space(N)] attribute; -1 = not specified
+//   m_BaseInheritances– srinput names inherited from (in declaration order)
+//                       Inherited content is flattened before this srinput's body items.
 //   m_Members         – list of direct cbuffer references
 //   m_Resources       – list of direct SRV/UAV resource members
 //   m_Samplers        – list of direct sampler members
@@ -210,6 +213,7 @@ struct SrInputDef
 {
     std::string                 m_Name;
     int                         m_RegisterSpace = -1;  // -1 = no [space(N)] attribute
+    std::vector<std::string>    m_BaseInheritances;    // base srinput names, in declaration order
     std::vector<SrInputMember>  m_Members;
     std::vector<ResourceMember> m_Resources;
     std::vector<SamplerMember>  m_Samplers;

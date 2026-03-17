@@ -1,0 +1,12 @@
+// EXPECTED TO FAIL: name clash between inherited resource member and a body resource member.
+// Base has 'm_Albedo' (SRV); Derived body also declares 'm_Albedo' -- name clash.
+
+srinput Base
+{
+    Texture2D<float4> m_Albedo;
+};
+
+srinput Derived : Base
+{
+    Texture2D<float4> m_Albedo;  // ERROR: 'm_Albedo' already inherited from Base
+};

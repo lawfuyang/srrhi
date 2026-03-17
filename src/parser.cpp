@@ -753,13 +753,111 @@ struct Parser
             {
                 Advance();
                 Token srInputName = Expect(TokKind::Ident, "srinput name");
+
+                // ---- Optional inheritance list: : [public|protected|private] Base1, Base2, ... ----
+                std::vector<std::string> baseInheritances;
+                if (Check(TokKind::Colon))
+                {
+                    int colonLine = m_Cur.m_Line;
+                    Advance(); // consume ':'
+
+                    do
+                    {
+                        // Skip optional access specifiers (public/protected/private)
+                        if (m_Cur.m_Kind == TokKind::Ident &&
+                            (m_Cur.m_Text == "public" || m_Cur.m_Text == "protected" || m_Cur.m_Text == "private"))
+                        {
+                            Advance();
+                        }
+
+                        if (m_Cur.m_Kind != TokKind::Ident)
+                            throw std::runtime_error(m_FilePath + ":" + std::to_string(m_Cur.m_Line) +
+                                                     ": expected base srinput name after ':' in srinput '" +
+                                                     srInputName.m_Text + "'");
+
+                        Token baseTok = m_Cur;
+                        Advance();
+
+                        // Self-inheritance check
+                        if (baseTok.m_Text == srInputName.m_Text)
+                            throw std::runtime_error(m_FilePath + ":" + std::to_string(baseTok.m_Line) +
+                                                     ": srinput '" + srInputName.m_Text +
+                                                     "' cannot inherit from itself");
+
+                        // Forward reference check: base must be previously declared
+                        auto baseIt = m_SrInputMap.find(baseTok.m_Text);
+                        if (baseIt == m_SrInputMap.end())
+                        {
+                            LogMsg("[parser] ERROR: srinput '%s' inherits unknown base '%s' at line %d\n",
+                                   srInputName.m_Text.c_str(), baseTok.m_Text.c_str(), baseTok.m_Line);
+                            throw std::runtime_error(m_FilePath + ":" + std::to_string(baseTok.m_Line) +
+                                                     ": srinput '" + srInputName.m_Text +
+                                                     "' inherits from '" + baseTok.m_Text +
+                                                     "' which has not been declared yet; srinput inheritance requires forward declarations to be declared first");
+                        }
+
+                        // Duplicate base check
+                        for (const auto& existing : baseInheritances)
+                        {
+                            if (existing == baseTok.m_Text)
+                            {
+                                LogMsg("[parser] ERROR: srinput '%s' lists base '%s' more than once at line %d\n",
+                                       srInputName.m_Text.c_str(), baseTok.m_Text.c_str(), baseTok.m_Line);
+                                throw std::runtime_error(m_FilePath + ":" + std::to_string(baseTok.m_Line) +
+                                                         ": srinput '" + srInputName.m_Text +
+                                                         "' inherits from '" + baseTok.m_Text +
+                                                         "' more than once; duplicate base srinputs are not allowed");
+                            }
+                        }
+
+                        baseInheritances.push_back(baseTok.m_Text);
+                    }
+                    while (TryConsume(TokKind::Comma));
+                }
+
                 Expect(TokKind::LBrace, "{");
 
                 SrInputDef srInputDef;
-                srInputDef.m_Name          = srInputName.m_Text;
-                srInputDef.m_RegisterSpace = pendingRegisterSpace;
+                srInputDef.m_Name             = srInputName.m_Text;
+                srInputDef.m_RegisterSpace    = pendingRegisterSpace;
+                srInputDef.m_BaseInheritances = std::move(baseInheritances);
                 std::unordered_set<std::string> srInputMemberNames;
-                int pushConstantCount = 0; // enforce max one [push_constant] per srinput
+                int pushConstantCount = 0; // enforce max one [push_constant] per srinput body
+
+                // Pre-populate name set with all names from flattened bases,
+                // so that body items can be checked for clashes against inherited names.
+                for (const auto& baseName : srInputDef.m_BaseInheritances)
+                {
+                    for (const auto& other : m_Result.m_SrInputDefs)
+                    {
+                        if (other.m_Name == baseName)
+                        {
+                            FlatSrInput baseFlat = FlattenSrInput(other, m_Result.m_SrInputDefs);
+                            auto checkInheritedName = [&](const std::string& name, int line)
+                            {
+                                if (!srInputMemberNames.insert(name).second)
+                                {
+                                    LogMsg("[parser] ERROR: inherited name '%s' from base '%s' clashes with another inherited name in srinput '%s'\n",
+                                           name.c_str(), baseName.c_str(), srInputDef.m_Name.c_str());
+                                    throw std::runtime_error(m_FilePath + ":" + std::to_string(line) +
+                                                             ": inherited name '" + name +
+                                                             "' from base '" + baseName +
+                                                             "' clashes with a name already inherited by '" +
+                                                             srInputDef.m_Name + "'");
+                                }
+                            };
+                            for (const auto& m  : baseFlat.m_Members)
+                                checkInheritedName(m.m_MemberName, srInputName.m_Line);
+                            for (const auto& r  : baseFlat.m_Resources)
+                                checkInheritedName(r.m_MemberName, srInputName.m_Line);
+                            for (const auto& s  : baseFlat.m_Samplers)
+                                checkInheritedName(s.m_MemberName, srInputName.m_Line);
+                            for (const auto& sc : baseFlat.m_ScalarConsts)
+                                checkInheritedName(sc.m_Name, srInputName.m_Line);
+                            break;
+                        }
+                    }
+                }
 
                 while (!Check(TokKind::RBrace) && !Check(TokKind::Eof))
                 {

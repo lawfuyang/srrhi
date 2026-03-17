@@ -1,0 +1,20 @@
+// Positive test: inheritance with scalar constants.
+// Derived inherits Base's scalar consts; adds its own.
+// All scalar const names must be unique in the flattened view.
+
+srinput Base
+{
+    static const uint  MaxLights    = 16;
+    static const float AmbientScale = 0.1;
+};
+
+srinput Mid : Base
+{
+    static const float ShadowBias   = 0.001;
+};
+
+srinput Derived : Mid
+{
+    static const uint  MaxShadows   = 4;
+    static const float FogDensity   = 0.05;
+};

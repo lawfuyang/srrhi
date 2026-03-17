@@ -1,0 +1,27 @@
+// Positive test: [space(N)] attribute on derived srinput.
+// All resources in the flattened view use the child-most srinput's space.
+// Base has no space; Derived declares space(2). All bindings use space2.
+
+cbuffer FrameConsts
+{
+    float4x4 m_ViewProj;
+};
+
+cbuffer SceneConsts
+{
+    float4 m_FogColor;
+};
+
+srinput Base
+{
+    FrameConsts       m_Frame;
+    Texture2D<float4> m_BaseTexture;
+    SamplerState      m_BaseSampler;
+};
+
+[space(2)]
+srinput Derived : Base
+{
+    SceneConsts       m_Scene;
+    Texture2D<float4> m_DerivedTexture;
+};

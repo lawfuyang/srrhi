@@ -92,6 +92,16 @@ static const std::unordered_set<std::string> k_ExpectedFailStems = {
     "test_srinput_compose_name_clash_sampler",
     "test_srinput_compose_name_clash_scalar",
     "test_srinput_compose_forward_ref",
+    // Srinput inheritance error tests
+    "test_srinput_inherit_forward_ref",
+    "test_srinput_inherit_self",
+    "test_srinput_inherit_duplicate_base",
+    "test_srinput_inherit_name_clash_cbuf",
+    "test_srinput_inherit_name_clash_resource",
+    "test_srinput_inherit_name_clash_sampler",
+    "test_srinput_inherit_name_clash_scalar",
+    "test_srinput_inherit_name_clash_between_bases",
+    "test_srinput_inherit_push_constant_multiple",
 };
 
 // ---------------------------------------------------------------------------

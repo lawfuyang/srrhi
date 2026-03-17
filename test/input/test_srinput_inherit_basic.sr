@@ -1,0 +1,25 @@
+// Positive test: basic single inheritance.
+// Derived inherits Base's cbuffer. The flattened Derived should have:
+//   b0 = FrameConsts (from Base), b1 = SceneConsts (from Derived body).
+
+cbuffer FrameConsts
+{
+    float4x4 m_ViewProj;
+    float    m_Time;
+};
+
+cbuffer SceneConsts
+{
+    float3 m_SunDir;
+    float  m_Intensity;
+};
+
+srinput Base
+{
+    FrameConsts m_Frame;
+};
+
+srinput Derived : Base
+{
+    SceneConsts m_Scene;
+};

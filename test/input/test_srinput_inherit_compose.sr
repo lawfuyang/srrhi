@@ -1,0 +1,36 @@
+// Positive test: inheritance combined with composition.
+// ComboInput inherits Base's members AND composes Extra via a nested ref.
+// Flat order: Base (b0), then ComboInput body (Extra nested as composition = b1, b2).
+
+cbuffer FrameConsts
+{
+    float4x4 m_ViewProj;
+};
+
+cbuffer LightConsts
+{
+    float3 m_Color;
+    float  m_Radius;
+};
+
+cbuffer ShadowConsts
+{
+    float m_Bias;
+};
+
+srinput Base
+{
+    FrameConsts m_Frame;
+};
+
+srinput Extra
+{
+    LightConsts  m_Light;
+    ShadowConsts m_Shadow;
+};
+
+// Inherits Base, also composes Extra inline
+srinput ComboInput : Base
+{
+    Extra m_Extra;  // composition: Extra's cbuffers inlined at b1, b2
+};

@@ -1,0 +1,23 @@
+// Positive test: push_constant defined in base, inherited by derived.
+// Flattened Derived has exactly 1 push_constant (from Base), which is allowed.
+
+cbuffer PushData
+{
+    float4 m_PushVec;
+};
+
+cbuffer ExtraConsts
+{
+    float m_Scale;
+};
+
+srinput Base
+{
+    [push_constant]
+    PushData    m_Push;
+};
+
+srinput Derived : Base
+{
+    ExtraConsts m_Extra;
+};

@@ -1,0 +1,12 @@
+// EXPECTED TO FAIL: name clash between inherited sampler member and a body sampler member.
+// Base has 'm_Linear'; Derived body also declares 'm_Linear' -- name clash.
+
+srinput Base
+{
+    SamplerState m_Linear;
+};
+
+srinput Derived : Base
+{
+    SamplerState m_Linear;  // ERROR: 'm_Linear' already inherited from Base
+};

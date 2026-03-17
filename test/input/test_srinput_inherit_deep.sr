@@ -1,0 +1,35 @@
+// Positive test: deep inheritance chain (a : b, where b : c).
+// Grand-child flattened: GrandBase cbuffers first, then Mid cbuffers, then Leaf cbuffers.
+//   b0 = GrandConsts (GrandBase), b1 = MidConsts (Mid), b2 = LeafConsts (Leaf).
+
+cbuffer GrandConsts
+{
+    float4x4 m_WorldMatrix;
+};
+
+cbuffer MidConsts
+{
+    float3 m_AmbientColor;
+    float  m_Pad;
+};
+
+cbuffer LeafConsts
+{
+    uint m_FrameIndex;
+    uint m_Flags;
+};
+
+srinput GrandBase
+{
+    GrandConsts m_Grand;
+};
+
+srinput Mid : GrandBase
+{
+    MidConsts m_Mid;
+};
+
+srinput Leaf : Mid
+{
+    LeafConsts m_Leaf;
+};

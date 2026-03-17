@@ -1,0 +1,18 @@
+// EXPECTED TO FAIL: name clash between two inherited base srinputs.
+// BaseA has 'm_Albedo'; BaseB also has 'm_Albedo' -- clash when both are inherited.
+
+srinput BaseA
+{
+    Texture2D<float4> m_Albedo;
+    SamplerState      m_Sampler;
+};
+
+srinput BaseB
+{
+    Texture2D<float4> m_Albedo;  // same name as BaseA
+    Texture2D<float>  m_Depth;
+};
+
+srinput Derived : BaseA, BaseB  // ERROR: 'm_Albedo' from BaseB clashes with BaseA
+{
+};

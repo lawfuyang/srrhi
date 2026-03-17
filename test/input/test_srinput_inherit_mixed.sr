@@ -1,0 +1,29 @@
+// Positive test: inheritance with all member kinds (cbuffers, resources, samplers, scalars).
+// Base defines a cbuffer, an SRV, a sampler, and a scalar const.
+// Derived inherits all of them and adds one of each kind.
+
+cbuffer BaseConsts
+{
+    float4x4 m_ViewProj;
+};
+
+cbuffer DerivedConsts
+{
+    float m_Exposure;
+};
+
+srinput Base
+{
+    BaseConsts           m_Base;
+    Texture2D<float4>    m_BaseTexture;
+    SamplerState         m_BaseSampler;
+    static const uint    BaseVersion = 1;
+};
+
+srinput Derived : Base
+{
+    DerivedConsts        m_Derived;
+    Texture2D<float4>    m_DerivedTexture;
+    SamplerState         m_DerivedSampler;
+    static const float   DerivedScale = 2.0;
+};

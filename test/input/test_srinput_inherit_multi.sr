@@ -1,0 +1,45 @@
+// Positive test: multiple inheritance.
+// Derived inherits two bases. Flat order: BaseA (b0), BaseB (b1,b2), then Derived body (b3).
+// SRVs: t0 (from BaseA), t1 (from BaseB), t2 (from Derived body).
+
+cbuffer CameraConsts
+{
+    float3 m_Position;
+    float  m_FOV;
+};
+
+cbuffer LightConsts
+{
+    float3 m_Color;
+    float  m_Intensity;
+};
+
+cbuffer ShadowConsts
+{
+    float4x4 m_LightViewProj;
+};
+
+cbuffer PostConsts
+{
+    float m_Exposure;
+    float m_Gamma;
+};
+
+srinput BaseA
+{
+    CameraConsts m_Camera;
+    Texture2D<float4> m_AlbedoA;
+};
+
+srinput BaseB
+{
+    LightConsts  m_Light;
+    ShadowConsts m_Shadow;
+    Texture2D<float4> m_AlbedoB;
+};
+
+srinput Derived : BaseA, BaseB
+{
+    PostConsts m_Post;
+    Texture2D<float4> m_Output;
+};

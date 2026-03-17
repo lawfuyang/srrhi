@@ -1,0 +1,16 @@
+// EXPECTED TO FAIL: duplicate base in the inheritance list.
+// Listing the same base srinput twice is not allowed.
+
+cbuffer FrameConsts
+{
+    float4x4 m_ViewProj;
+};
+
+srinput Base
+{
+    FrameConsts m_Frame;
+};
+
+srinput Derived : Base, Base  // ERROR: 'Base' listed more than once
+{
+};

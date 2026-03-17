@@ -1,0 +1,25 @@
+// EXPECTED TO FAIL: multiple push_constant members in the flattened inheritance view.
+// Base has [push_constant] on PushA; Derived body adds [push_constant] on PushB.
+// Total push constants in flattened Derived = 2, which is not allowed.
+
+cbuffer PushA
+{
+    float4 m_A;
+};
+
+cbuffer PushB
+{
+    float4 m_B;
+};
+
+srinput Base
+{
+    [push_constant]
+    PushA m_PushA;
+};
+
+srinput Derived : Base
+{
+    [push_constant]
+    PushB m_PushB;  // ERROR: flattened Derived has 2 push constants (PushA + PushB)
+};

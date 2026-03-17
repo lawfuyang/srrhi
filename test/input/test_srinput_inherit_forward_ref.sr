@@ -1,0 +1,18 @@
+// EXPECTED TO FAIL: forward reference in inheritance.
+// Derived tries to inherit from NotYetDeclared, which is declared after Derived.
+// srinput inheritance requires bases to be declared before the derived srinput.
+
+cbuffer FrameConsts
+{
+    float4x4 m_ViewProj;
+};
+
+srinput Derived : NotYetDeclared  // ERROR: NotYetDeclared has not been declared yet
+{
+    FrameConsts m_Frame;
+};
+
+srinput NotYetDeclared
+{
+    // declared too late
+};
