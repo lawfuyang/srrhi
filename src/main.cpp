@@ -20,6 +20,65 @@ std::string VisualizeLayoutsMachineReadable(const std::vector<LayoutMember>& lay
 int RunReflectionTests(const fs::path& testInputDir);
 
 // ---------------------------------------------------------------------------
+// Generate minimal validation .cpp stubs for each generated .h file.
+// Each stub simply includes the header and compiles it.  All static_assert
+// register-index checks are emitted directly by the C++ code generator into
+// the header itself, so no extra logic is needed here.
+// ---------------------------------------------------------------------------
+static int GenerateValidationStubs(const fs::path& headerDir)
+{
+    LogMsg("[srrhi] Generating validation stubs in: %s\n", headerDir.string().c_str());
+
+    if (!fs::exists(headerDir) || !fs::is_directory(headerDir))
+    {
+        LogMsg("[srrhi] ERROR: Header directory does not exist: %s\n",
+               headerDir.string().c_str());
+        return 1;
+    }
+
+    int count = 0;
+    for (const auto& entry : fs::directory_iterator(headerDir))
+    {
+        if (!entry.is_regular_file()) continue;
+        const fs::path& hFile = entry.path();
+        if (hFile.extension() != ".h") continue;
+
+        std::string headerName = hFile.filename().string();
+        std::string stem       = headerName.substr(0, headerName.size() - 2); // strip ".h"
+        std::string stubName   = "validation_" + stem + ".cpp";
+        fs::path    stubPath   = headerDir / stubName;
+
+        std::string code =
+            "// Auto-generated validation stub for " + headerName + "\n"
+            "// Compile-time layout and register-index validation is done via\n"
+            "// static_assert statements emitted directly into the header.\n"
+            "\n"
+            "#include <windows.h>\n"
+            "#include <DirectXMath.h>\n"
+            "\n"
+            "#include \"" + headerName + "\"\n"
+            "\n"
+            "int main() { return 0; }\n";
+
+        try
+        {
+            WriteFile(stubPath, code);
+            LogMsg("[srrhi]   -> %s\n", stubPath.string().c_str());
+            ++count;
+        }
+        catch (const std::exception& e)
+        {
+            LogMsg("[srrhi] ERROR writing validation stub '%s': %s\n",
+                   stubPath.string().c_str(), e.what());
+            return 1;
+        }
+    }
+
+    LogMsg("[srrhi] Generated %d validation stub(s).\n", count);
+    return 0;
+}
+
+// ---------------------------------------------------------------------------
 // Global flags
 // ---------------------------------------------------------------------------
 static bool g_Verbose = false; // -v or --test enables visualizer output to stdout
@@ -199,7 +258,8 @@ int main(int argc, char* argv[])
     // --- Parse arguments ---
     std::string inputDir;
     std::string outputDir;
-    bool runTests = false;
+    bool runTests        = false;
+    bool genValidation   = false;
 
     for (int i = 1; i < argc; ++i)
     {
@@ -225,19 +285,30 @@ int main(int argc, char* argv[])
             g_Verbose = true;
             LogMsg("[srrhi] Arg --test: reflection test mode enabled\n");
         }
+        else if (arg == "--gen-validation")
+        {
+            genValidation = true;
+            LogMsg("[srrhi] Arg --gen-validation: validation stub generation enabled\n");
+        }
         else if (arg == "--help" || arg == "-h")
         {
-            LogMsg("Usage: srrhi -i <input-dir> -o <output-dir> [-v] [--test]\n"
-                   "  -i <dir>   Input folder (recursively scanned for .sr files)\n"
-                   "  -o <dir>   Output folder (hlsl/ and cpp/ subfolders created)\n"
-                   "  -v         Verbose: print visualizer output to stdout\n"
-                   "  --test     After generation, verify cbuffer layouts via DXC reflection (implies -v)\n");
+            LogMsg("Usage: srrhi -i <input-dir> -o <output-dir> [-v] [--test [--gen-validation]]\n"
+                   "  -i <dir>           Input folder (recursively scanned for .sr files)\n"
+                   "  -o <dir>           Output folder (hlsl/ and cpp/ subfolders created)\n"
+                   "  -v                 Verbose: print visualizer output to stdout\n"
+                   "  --test             After generation, verify cbuffer layouts via DXC reflection (implies -v)\n"
+                   "  --gen-validation   (requires --test) Generate validation .cpp stubs for each generated .h\n");
             return 0;
         }
         else
         {
             LogMsg("[srrhi] WARNING: Unknown argument ignored: %s\n", arg.c_str());
         }
+    }
+
+    if (genValidation && !runTests)
+    {
+        LogMsg("[srrhi] WARNING: --gen-validation has no effect without --test.\n");
     }
 
     if (inputDir.empty())
@@ -336,6 +407,20 @@ int main(int argc, char* argv[])
 
     if (runTests)
     {
+        // --gen-validation: generate validation .cpp stubs for each produced .h
+        if (genValidation)
+        {
+            LogMsg("\n[srrhi] Generating validation stubs...\n");
+            fs::path headerDir = outputRoot / "cpp";
+            int genResult = GenerateValidationStubs(headerDir);
+            if (genResult != 0)
+            {
+                LogMsg("[srrhi] Validation stub generation FAILED.\n");
+                return genResult;
+            }
+            LogMsg("[srrhi] Validation stub generation PASSED.\n");
+        }
+
         LogMsg("\n[srrhi] Running reflection tests against DXC...\n");
         int testResult = 1;
         try
