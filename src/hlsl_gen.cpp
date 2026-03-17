@@ -163,12 +163,11 @@ static void EmitWrappedCBufferHlsl(std::ostringstream& out,
                                    const StructType& cbufferDef,
                                    const LayoutMember& layout,
                                    int registerNum,
-                                   int spaceNum,
                                    const std::string& varName,
                                    int& padCount)
 {
     out << "cbuffer " << cbufferDef.m_Name << " : register(b" << registerNum
-        << ", space" << spaceNum << ")\n{\n";
+        << ")\n{\n";
 
     // Variable name: {SrInputName}_{CleanedMemberName}
     out << "    " << cbufferDef.m_Name << " " << varName << ";\n";
@@ -234,7 +233,8 @@ std::string GenerateHlsl(const ParseResult& pr,
     std::vector<CbufInfo> allCbufInfos;
 
     LogMsg("[hlsl_gen]   Emitting cbuffers with register bindings...\n");
-    int srInputIdx = 0;  // register space index — one space per srinput
+    // All srinputs share space0 — only one srinput is active per shader dispatch,
+    // so register numbers are assigned per-srinput (reset each scope) within space0.
     for (const auto& srInputDef : pr.m_SrInputDefs)
     {
         int regNum = 0;  // b# counter: local to this srinput scope, advances for every cbuffer
@@ -269,10 +269,9 @@ std::string GenerateHlsl(const ParseResult& pr,
                 if (correspondingLayout)
                 {
                     int localPadCount = 0;
-                    // All cbuffers use sequential per-srinput counter; each srinput
-                    // has its own register space so they never collide across srinputs.
+                    // All srinputs use space0 — only one srinput is used per dispatch.
                     EmitWrappedCBufferHlsl(out, *bufDef, *correspondingLayout,
-                                          regNum, srInputIdx, varName, localPadCount);
+                                          regNum, varName, localPadCount);
                 }
 
                 allCbufInfos.push_back({srInputDef.m_Name, cleanedMemberName,
@@ -282,14 +281,12 @@ std::string GenerateHlsl(const ParseResult& pr,
             // Always advance — push constants occupy b0 and advance to b1, etc.
             ++regNum;
         }
-        ++srInputIdx;
     }
 
     // Emit per-srinput resource declarations (SRV/UAV globals with register bindings).
     // SRV and UAV register counters are local to each srinput scope (reset per scope).
-    // Each srinput uses its own register space (spaceN) to avoid cross-srinput collisions.
+    // All srinputs use space0 — only one srinput is active per shader dispatch.
     LogMsg("[hlsl_gen]   Emitting resource declarations...\n");
-    srInputIdx = 0;
     for (const auto& srInputDef : pr.m_SrInputDefs)
     {
         int srvReg = 0;
@@ -302,16 +299,15 @@ std::string GenerateHlsl(const ParseResult& pr,
             int regNum = bUAV ? uavReg++ : srvReg++;
             out << rm.m_TypeName << " " << globalVarName
                 << " : register(" << (bUAV ? "u" : "t") << regNum
-                << ", space" << srInputIdx << ");\n";
+                << ");\n";
         }
         if (!srInputDef.m_Resources.empty())
             out << "\n";
-        ++srInputIdx;
     }
 
     // Emit per-srinput sampler declarations (s# registers, local per scope).
+    // All srinputs use space0 — only one srinput is active per shader dispatch.
     LogMsg("[hlsl_gen]   Emitting sampler declarations...\n");
-    srInputIdx = 0;
     for (const auto& srInputDef : pr.m_SrInputDefs)
     {
         int samplerReg = 0;
@@ -320,11 +316,10 @@ std::string GenerateHlsl(const ParseResult& pr,
             const std::string cleanedName = CleanMemberName(sm.m_MemberName);
             const std::string globalVarName = srInputDef.m_Name + "_" + cleanedName;
             out << sm.m_TypeName << " " << globalVarName
-                << " : register(s" << samplerReg++ << ", space" << srInputIdx << ");\n";
+                << " : register(s" << samplerReg++ << ");\n";
         }
         if (!srInputDef.m_Samplers.empty())
             out << "\n";
-        ++srInputIdx;
     }
 
     // Emit per-srinput namespaces with getter functions

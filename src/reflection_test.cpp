@@ -603,14 +603,38 @@ int RunReflectionTests(const fs::path& testInputDir)
         // This must match what GenerateHlsl() emits for srinput cbuffers.
         auto cbufVarNames = BuildCbufVarNameMap(pr);
 
-        // Append a compute-shader entry point that reads from each cbuffer so
-        // DXC preserves them in the shader reflection.
-        std::string hlslFull = hlslBase + "\n" + BuildDummyEntryPoint(layouts, pr, cbufVarNames);
+        // Since all srinputs share space0, only one srinput can be active per
+        // shader dispatch.  For the reflection test we validate only the first
+        // srinput's cbuffers so the dummy shader has no register conflicts.
+        std::vector<LayoutMember> firstSrInputLayouts;
+        if (!pr.m_SrInputDefs.empty())
+        {
+            const auto& firstSrInput = pr.m_SrInputDefs[0];
+            for (const auto& member : firstSrInput.m_Members)
+            {
+                for (const auto& lm : layouts)
+                {
+                    if (lm.m_Name == member.m_CBufferName)
+                    {
+                        firstSrInputLayouts.push_back(lm);
+                        break;
+                    }
+                }
+            }
+        }
+        else
+        {
+            firstSrInputLayouts = layouts;
+        }
+
+        // Append a compute-shader entry point that reads from the first srinput's
+        // cbuffers so DXC preserves them in the shader reflection.
+        std::string hlslFull = hlslBase + "\n" + BuildDummyEntryPoint(firstSrInputLayouts, pr, cbufVarNames);
 
         // ---- Build the set of "real" member names for padding detection ----
-        // This covers all top-level submembers across all cbuffers.
+        // This covers all top-level submembers across the first srinput's cbuffers.
         std::unordered_map<std::string, int> ourMembers;
-        for (const auto& cbLayout : layouts)
+        for (const auto& cbLayout : firstSrInputLayouts)
             for (const auto& m : cbLayout.m_Submembers)
                 ourMembers[m.m_Name] = m.m_Offset;
 
@@ -640,8 +664,9 @@ int RunReflectionTests(const fs::path& testInputDir)
         }
 
         // ---- Compare -------------------------------------------------------
+        // Compare only the first srinput's cbuffers (the ones compiled into the dummy shader).
         std::ostringstream report;
-        bool               ok = CompareWithReflection(layouts, reflected, report, cbufVarNames);
+        bool               ok = CompareWithReflection(firstSrInputLayouts, reflected, report, cbufVarNames);
 
         if (ok)
         {
