@@ -201,6 +201,15 @@ static void ProcessFile(const fs::path& srFile,
     fs::path relPath = fs::relative(srFile, inputRoot);
     fs::path stem    = relPath.parent_path() / srFile.stem();
 
+    // Returns true if outPath needs to be (re)written:
+    // either it doesn't exist yet, or its timestamp is older than the source .sr file.
+    auto NeedsWrite = [&](const fs::path& outPath) -> bool
+    {
+        if (bEmitValidation) return true; // In validation generation mode, always write stubs
+        if (!fs::exists(outPath)) return true;
+        return fs::last_write_time(outPath) < fs::last_write_time(srFile);
+    };
+
     // --- Generate HLSL ---
     try
     {
@@ -217,8 +226,15 @@ static void ProcessFile(const fs::path& srFile,
 
         fs::path hlslOut = outputRoot / "hlsl" / stem;
         hlslOut += ".hlsli";
-        WriteFile(hlslOut, hlslContent);
-        LogMsg("  HLSL  -> %s\n", hlslOut.string().c_str());
+        if (NeedsWrite(hlslOut))
+        {
+            WriteFile(hlslOut, hlslContent);
+            LogMsg("  HLSL  -> %s\n", hlslOut.string().c_str());
+        }
+        else
+        {
+            LogMsg("  HLSL  up-to-date, skipped: %s\n", hlslOut.string().c_str());
+        }
         globalPadCount = padCount;
     }
     catch (const std::exception& e)
@@ -236,8 +252,15 @@ static void ProcessFile(const fs::path& srFile,
 
         fs::path cppOut = outputRoot / "cpp" / stem;
         cppOut += ".h";
-        WriteFile(cppOut, cppContent);
-        LogMsg("  C++   -> %s\n", cppOut.string().c_str());
+        if (NeedsWrite(cppOut))
+        {
+            WriteFile(cppOut, cppContent);
+            LogMsg("  C++   -> %s\n", cppOut.string().c_str());
+        }
+        else
+        {
+            LogMsg("  C++   up-to-date, skipped: %s\n", cppOut.string().c_str());
+        }
         globalPadCount = padCount;
     }
     catch (const std::exception& e)

@@ -3,7 +3,7 @@
 // It tests the new class-based cbuffer design with private members + public setters,
 // HLSL namespace getters, and per-srinput register index constants.
 
-#include <cassert>
+#include <stdexcept>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -18,6 +18,9 @@
 #include "test_setter_prefix.h"
 #include "test_setter_multi.h"
 
+
+#define VALIDATE(expr) \
+    do { if (!(expr)) { fprintf(stderr, "FAIL: " #expr "\n"); throw std::runtime_error("Check failed: " #expr); } } while(0)
 using namespace srrhi;
 
 // =============================================================================
@@ -250,30 +253,30 @@ static bool TestSceneSetterByteOffsets()
 
     // SetExposure writes a float at offset 268
     sc.SetExposure(3.14f);
-    assert(ReadAt<float>(raw, 268) == 3.14f);
+    VALIDATE(ReadAt<float>(raw, 268) == 3.14f);
 
     // SetFrameNumber writes a uint32_t at offset 304
     sc.SetFrameNumber(0xDEADBEEFu);
-    assert(ReadAt<uint32_t>(raw, 304) == 0xDEADBEEFu);
+    VALIDATE(ReadAt<uint32_t>(raw, 304) == 0xDEADBEEFu);
 
     // SetDeltaTime writes a float at offset 308
     sc.SetDeltaTime(0.016f);
-    assert(ReadAt<float>(raw, 308) == 0.016f);
+    VALIDATE(ReadAt<float>(raw, 308) == 0.016f);
 
     // SetCameraPosWS writes 3 floats at offset 256
     DirectX::XMFLOAT3 pos = {1.0f, 2.0f, 3.0f};
     sc.SetCameraPosWS(pos);
-    assert(ReadAt<float>(raw, 256) == 1.0f);
-    assert(ReadAt<float>(raw, 260) == 2.0f);
-    assert(ReadAt<float>(raw, 264) == 3.0f);
+    VALIDATE(ReadAt<float>(raw, 256) == 1.0f);
+    VALIDATE(ReadAt<float>(raw, 260) == 2.0f);
+    VALIDATE(ReadAt<float>(raw, 264) == 3.0f);
 
     // SetFogParams writes 4 floats at offset 272
     DirectX::XMFLOAT4 fog = {0.1f, 0.2f, 0.3f, 0.4f};
     sc.SetFogParams(fog);
-    assert(ReadAt<float>(raw, 272) == 0.1f);
-    assert(ReadAt<float>(raw, 276) == 0.2f);
-    assert(ReadAt<float>(raw, 280) == 0.3f);
-    assert(ReadAt<float>(raw, 284) == 0.4f);
+    VALIDATE(ReadAt<float>(raw, 272) == 0.1f);
+    VALIDATE(ReadAt<float>(raw, 276) == 0.2f);
+    VALIDATE(ReadAt<float>(raw, 280) == 0.3f);
+    VALIDATE(ReadAt<float>(raw, 284) == 0.4f);
 
     printf("  [PASS] SceneConstants setter byte offsets verified via GetRawBytes()\n");
     return true;
@@ -287,14 +290,14 @@ static bool TestSrinputBasicSetterByteOffsets()
 
     // SetTime writes a float at offset 64
     fc.SetTime(9.99f);
-    assert(ReadAt<float>(rawFc, 64) == 9.99f);
+    VALIDATE(ReadAt<float>(rawFc, 64) == 9.99f);
 
     PassConsts pc;
     const uint8_t* rawPc = pc.GetRawBytes();
 
     // SetPassIdx writes a uint32_t at offset 0
     pc.SetPassIdx(7u);
-    assert(ReadAt<uint32_t>(rawPc, 0) == 7u);
+    VALIDATE(ReadAt<uint32_t>(rawPc, 0) == 7u);
 
     printf("  [PASS] FrameConsts/PassConsts setter byte offsets verified via GetRawBytes()\n");
     return true;
@@ -309,32 +312,32 @@ static bool TestSetterTypesByteOffsets()
 
     // SetScalarFloat at offset 0
     tb.SetScalarFloat(2.71828f);
-    assert(ReadAt<float>(raw, 0) == 2.71828f);
+    VALIDATE(ReadAt<float>(raw, 0) == 2.71828f);
 
     // SetScalarUint at offset 4
     tb.SetScalarUint(42u);
-    assert(ReadAt<uint32_t>(raw, 4) == 42u);
+    VALIDATE(ReadAt<uint32_t>(raw, 4) == 42u);
 
     // SetVec3 at offset 16 (3 floats)
     DirectX::XMFLOAT3 v3 = {10.0f, 20.0f, 30.0f};
     tb.SetVec3(v3);
-    assert(ReadAt<float>(raw, 16) == 10.0f);
-    assert(ReadAt<float>(raw, 20) == 20.0f);
-    assert(ReadAt<float>(raw, 24) == 30.0f);
+    VALIDATE(ReadAt<float>(raw, 16) == 10.0f);
+    VALIDATE(ReadAt<float>(raw, 20) == 20.0f);
+    VALIDATE(ReadAt<float>(raw, 24) == 30.0f);
 
     // SetVec4 at offset 32 (4 floats)
     DirectX::XMFLOAT4 v4 = {1.0f, 2.0f, 3.0f, 4.0f};
     tb.SetVec4(v4);
-    assert(ReadAt<float>(raw, 32) == 1.0f);
-    assert(ReadAt<float>(raw, 36) == 2.0f);
-    assert(ReadAt<float>(raw, 40) == 3.0f);
-    assert(ReadAt<float>(raw, 44) == 4.0f);
+    VALIDATE(ReadAt<float>(raw, 32) == 1.0f);
+    VALIDATE(ReadAt<float>(raw, 36) == 2.0f);
+    VALIDATE(ReadAt<float>(raw, 40) == 3.0f);
+    VALIDATE(ReadAt<float>(raw, 44) == 4.0f);
 
     // SetIvec2 at offset 112 (2 int32_t)
     DirectX::XMINT2 iv2 = {-5, 99};
     tb.SetIvec2(iv2);
-    assert(ReadAt<int32_t>(raw, 112) == -5);
-    assert(ReadAt<int32_t>(raw, 116) == 99);
+    VALIDATE(ReadAt<int32_t>(raw, 112) == -5);
+    VALIDATE(ReadAt<int32_t>(raw, 116) == 99);
 
     printf("  [PASS] TypedBuffer setter byte offsets verified via GetRawBytes()\n");
     return true;
@@ -348,11 +351,11 @@ static bool TestPrefixStrippingByteOffsets()
 
     // SetPrefixedFloat at offset 0
     pb.SetPrefixedFloat(1.5f);
-    assert(ReadAt<float>(raw, 0) == 1.5f);
+    VALIDATE(ReadAt<float>(raw, 0) == 1.5f);
 
     // SetStaticCount at offset 16 (after float + padding to vec4 boundary)
     pb.SetStaticCount(99u);
-    assert(ReadAt<uint32_t>(raw, 16) == 99u);
+    VALIDATE(ReadAt<uint32_t>(raw, 16) == 99u);
 
     printf("  [PASS] PrefixBuffer setter byte offsets verified via GetRawBytes()\n");
     return true;
@@ -366,22 +369,22 @@ static bool TestMultiSrInputSetterByteOffsets()
 
     // SetTime at offset 0
     pfd.SetTime(5.0f);
-    assert(ReadAt<float>(rawPfd, 0) == 5.0f);
+    VALIDATE(ReadAt<float>(rawPfd, 0) == 5.0f);
 
     // SetDeltaTime at offset 4
     pfd.SetDeltaTime(0.033f);
-    assert(ReadAt<float>(rawPfd, 4) == 0.033f);
+    VALIDATE(ReadAt<float>(rawPfd, 4) == 0.033f);
 
     // SetFrameIndex at offset 8
     pfd.SetFrameIndex(255u);
-    assert(ReadAt<uint32_t>(rawPfd, 8) == 255u);
+    VALIDATE(ReadAt<uint32_t>(rawPfd, 8) == 255u);
 
     PerObjectData pod;
     const uint8_t* rawPod = pod.GetRawBytes();
 
     // SetRoughness: after a float4x4 (64 bytes) and float3 (12 bytes) = offset 76
     pod.SetRoughness(0.75f);
-    assert(ReadAt<float>(rawPod, 76) == 0.75f);
+    VALIDATE(ReadAt<float>(rawPod, 76) == 0.75f);
 
     printf("  [PASS] Multi-srinput setter byte offsets verified via GetRawBytes()\n");
     return true;

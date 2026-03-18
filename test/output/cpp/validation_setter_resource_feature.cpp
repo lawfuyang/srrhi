@@ -14,7 +14,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
-#include <cassert>
+#include <stdexcept>
 #include <windows.h>
 #include <DirectXMath.h>
 
@@ -38,6 +38,9 @@
 //   SamplerOnlyPass (2 samplers, no cbuffers or resources)
 #include "test_sampler_only.h"
 
+
+#define VALIDATE(expr) \
+    do { if (!(expr)) { fprintf(stderr, "FAIL: " #expr "\n"); throw std::runtime_error("Check failed: " #expr); } } while(0)
 using namespace srrhi;
 
 // =============================================================================
@@ -98,52 +101,52 @@ static bool TestResourceEntryDefaults()
 
     // All pResource pointers must start as nullptr
     for (uint32_t i = 0; i < SetterTestInputs::NumResources; ++i)
-        assert(inputs.m_Resources[i].pResource == nullptr);
+        VALIDATE(inputs.m_Resources[i].pResource == nullptr);
 
     // Verify default mip/slice values: baseMipLevel=0, numMipLevels=-1, baseArraySlice=0, numArraySlices=-1
     for (uint32_t i = 0; i < SetterTestInputs::NumResources; ++i)
     {
-        assert(inputs.m_Resources[i].baseMipLevel   ==  0);
-        assert(inputs.m_Resources[i].numMipLevels   == -1);
-        assert(inputs.m_Resources[i].baseArraySlice ==  0);
-        assert(inputs.m_Resources[i].numArraySlices == -1);
+        VALIDATE(inputs.m_Resources[i].baseMipLevel   ==  0);
+        VALIDATE(inputs.m_Resources[i].numMipLevels   == -1);
+        VALIDATE(inputs.m_Resources[i].baseArraySlice ==  0);
+        VALIDATE(inputs.m_Resources[i].numArraySlices == -1);
     }
 
     // Ordering: [0]=cbuffer, [1..9]=Texture_SRV, [10..13]=non-texture SRV, [14..18]=Texture_UAV, [19..21]=non-texture UAV, [22..23]=Sampler
-    assert(inputs.m_Resources[0].type  == srrhi::ResourceType::ConstantBuffer);         // m_Frame       b0
-    assert(inputs.m_Resources[1].type  == srrhi::ResourceType::Texture_SRV);            // m_Tex1d       t0
-    assert(inputs.m_Resources[2].type  == srrhi::ResourceType::Texture_SRV);            // m_Tex1dArray  t1
-    assert(inputs.m_Resources[3].type  == srrhi::ResourceType::Texture_SRV);            // m_Tex2d       t2
-    assert(inputs.m_Resources[4].type  == srrhi::ResourceType::Texture_SRV);            // m_Tex2dArray  t3
-    assert(inputs.m_Resources[5].type  == srrhi::ResourceType::Texture_SRV);            // m_Tex2dms     t4
-    assert(inputs.m_Resources[6].type  == srrhi::ResourceType::Texture_SRV);            // m_Tex2dmsArray t5
-    assert(inputs.m_Resources[7].type  == srrhi::ResourceType::Texture_SRV);            // m_Tex3d       t6
-    assert(inputs.m_Resources[8].type  == srrhi::ResourceType::Texture_SRV);            // m_TexCube     t7
-    assert(inputs.m_Resources[9].type  == srrhi::ResourceType::Texture_SRV);            // m_TexCubeArray t8
-    assert(inputs.m_Resources[10].type == srrhi::ResourceType::TypedBuffer_SRV);        // m_TypedBuf    t9
-    assert(inputs.m_Resources[11].type == srrhi::ResourceType::StructuredBuffer_SRV);   // m_StructBuf   t10
-    assert(inputs.m_Resources[12].type == srrhi::ResourceType::RawBuffer_SRV);          // m_RawBuf      t11
-    assert(inputs.m_Resources[13].type == srrhi::ResourceType::RayTracingAccelStruct);  // m_AccelStruct t12
-    assert(inputs.m_Resources[14].type == srrhi::ResourceType::Texture_UAV);            // m_RwTex1d     u0
-    assert(inputs.m_Resources[15].type == srrhi::ResourceType::Texture_UAV);            // m_RwTex1dArray u1
-    assert(inputs.m_Resources[16].type == srrhi::ResourceType::Texture_UAV);            // m_RwTex2d     u2
-    assert(inputs.m_Resources[17].type == srrhi::ResourceType::Texture_UAV);            // m_RwTex2dArray u3
-    assert(inputs.m_Resources[18].type == srrhi::ResourceType::Texture_UAV);            // m_RwTex3d     u4
-    assert(inputs.m_Resources[19].type == srrhi::ResourceType::TypedBuffer_UAV);        // m_RwTypedBuf  u5
-    assert(inputs.m_Resources[20].type == srrhi::ResourceType::StructuredBuffer_UAV);   // m_RwStructBuf u6
-    assert(inputs.m_Resources[21].type == srrhi::ResourceType::RawBuffer_UAV);          // m_RwRawBuf    u7
-    assert(inputs.m_Resources[22].type == srrhi::ResourceType::Sampler);                // m_LinearSampler s0
-    assert(inputs.m_Resources[23].type == srrhi::ResourceType::Sampler);                // m_ShadowSampler s1
+    VALIDATE(inputs.m_Resources[0].type  == srrhi::ResourceType::ConstantBuffer);         // m_Frame       b0
+    VALIDATE(inputs.m_Resources[1].type  == srrhi::ResourceType::Texture_SRV);            // m_Tex1d       t0
+    VALIDATE(inputs.m_Resources[2].type  == srrhi::ResourceType::Texture_SRV);            // m_Tex1dArray  t1
+    VALIDATE(inputs.m_Resources[3].type  == srrhi::ResourceType::Texture_SRV);            // m_Tex2d       t2
+    VALIDATE(inputs.m_Resources[4].type  == srrhi::ResourceType::Texture_SRV);            // m_Tex2dArray  t3
+    VALIDATE(inputs.m_Resources[5].type  == srrhi::ResourceType::Texture_SRV);            // m_Tex2dms     t4
+    VALIDATE(inputs.m_Resources[6].type  == srrhi::ResourceType::Texture_SRV);            // m_Tex2dmsArray t5
+    VALIDATE(inputs.m_Resources[7].type  == srrhi::ResourceType::Texture_SRV);            // m_Tex3d       t6
+    VALIDATE(inputs.m_Resources[8].type  == srrhi::ResourceType::Texture_SRV);            // m_TexCube     t7
+    VALIDATE(inputs.m_Resources[9].type  == srrhi::ResourceType::Texture_SRV);            // m_TexCubeArray t8
+    VALIDATE(inputs.m_Resources[10].type == srrhi::ResourceType::TypedBuffer_SRV);        // m_TypedBuf    t9
+    VALIDATE(inputs.m_Resources[11].type == srrhi::ResourceType::StructuredBuffer_SRV);   // m_StructBuf   t10
+    VALIDATE(inputs.m_Resources[12].type == srrhi::ResourceType::RawBuffer_SRV);          // m_RawBuf      t11
+    VALIDATE(inputs.m_Resources[13].type == srrhi::ResourceType::RayTracingAccelStruct);  // m_AccelStruct t12
+    VALIDATE(inputs.m_Resources[14].type == srrhi::ResourceType::Texture_UAV);            // m_RwTex1d     u0
+    VALIDATE(inputs.m_Resources[15].type == srrhi::ResourceType::Texture_UAV);            // m_RwTex1dArray u1
+    VALIDATE(inputs.m_Resources[16].type == srrhi::ResourceType::Texture_UAV);            // m_RwTex2d     u2
+    VALIDATE(inputs.m_Resources[17].type == srrhi::ResourceType::Texture_UAV);            // m_RwTex2dArray u3
+    VALIDATE(inputs.m_Resources[18].type == srrhi::ResourceType::Texture_UAV);            // m_RwTex3d     u4
+    VALIDATE(inputs.m_Resources[19].type == srrhi::ResourceType::TypedBuffer_UAV);        // m_RwTypedBuf  u5
+    VALIDATE(inputs.m_Resources[20].type == srrhi::ResourceType::StructuredBuffer_UAV);   // m_RwStructBuf u6
+    VALIDATE(inputs.m_Resources[21].type == srrhi::ResourceType::RawBuffer_UAV);          // m_RwRawBuf    u7
+    VALIDATE(inputs.m_Resources[22].type == srrhi::ResourceType::Sampler);                // m_LinearSampler s0
+    VALIDATE(inputs.m_Resources[23].type == srrhi::ResourceType::Sampler);                // m_ShadowSampler s1
 
     // Spot-check slots
-    assert(inputs.m_Resources[0].slot  == SetterTestInputs::FrameRegisterIndex);        // b0
-    assert(inputs.m_Resources[3].slot  == SetterTestInputs::Tex2dRegisterIndex);        // t2
-    assert(inputs.m_Resources[10].slot == SetterTestInputs::TypedBufRegisterIndex);     // t9
-    assert(inputs.m_Resources[13].slot == SetterTestInputs::AccelStructRegisterIndex);  // t12
-    assert(inputs.m_Resources[16].slot == SetterTestInputs::RwTex2dRegisterIndex);      // u2
-    assert(inputs.m_Resources[19].slot == SetterTestInputs::RwTypedBufRegisterIndex);   // u5
-    assert(inputs.m_Resources[22].slot == SetterTestInputs::LinearSamplerRegisterIndex);// s0
-    assert(inputs.m_Resources[23].slot == SetterTestInputs::ShadowSamplerRegisterIndex);// s1
+    VALIDATE(inputs.m_Resources[0].slot  == SetterTestInputs::FrameRegisterIndex);        // b0
+    VALIDATE(inputs.m_Resources[3].slot  == SetterTestInputs::Tex2dRegisterIndex);        // t2
+    VALIDATE(inputs.m_Resources[10].slot == SetterTestInputs::TypedBufRegisterIndex);     // t9
+    VALIDATE(inputs.m_Resources[13].slot == SetterTestInputs::AccelStructRegisterIndex);  // t12
+    VALIDATE(inputs.m_Resources[16].slot == SetterTestInputs::RwTex2dRegisterIndex);      // u2
+    VALIDATE(inputs.m_Resources[19].slot == SetterTestInputs::RwTypedBufRegisterIndex);   // u5
+    VALIDATE(inputs.m_Resources[22].slot == SetterTestInputs::LinearSamplerRegisterIndex);// s0
+    VALIDATE(inputs.m_Resources[23].slot == SetterTestInputs::ShadowSamplerRegisterIndex);// s1
 
     printf("  [PASS] Resource entry defaults: nullptr, correct types, correct slots\n");
     return true;
@@ -179,16 +182,16 @@ static bool TestSimpleSetterOverload()
     inputs.SetLinearSampler  (&fakeLinearSampl);
     inputs.SetShadowSampler  (&fakeShadowSampl);
 
-    assert(inputs.m_Resources[0].pResource  == &fakeFrame);
-    assert(inputs.m_Resources[10].pResource == &fakeTypedBuf);
-    assert(inputs.m_Resources[11].pResource == &fakeStructBuf);
-    assert(inputs.m_Resources[12].pResource == &fakeRawBuf);
-    assert(inputs.m_Resources[13].pResource == &fakeAccelStruct);
-    assert(inputs.m_Resources[19].pResource == &fakeRwTypedBuf);
-    assert(inputs.m_Resources[20].pResource == &fakeRwStructBuf);
-    assert(inputs.m_Resources[21].pResource == &fakeRwRawBuf);
-    assert(inputs.m_Resources[22].pResource == &fakeLinearSampl);
-    assert(inputs.m_Resources[23].pResource == &fakeShadowSampl);
+    VALIDATE(inputs.m_Resources[0].pResource  == &fakeFrame);
+    VALIDATE(inputs.m_Resources[10].pResource == &fakeTypedBuf);
+    VALIDATE(inputs.m_Resources[11].pResource == &fakeStructBuf);
+    VALIDATE(inputs.m_Resources[12].pResource == &fakeRawBuf);
+    VALIDATE(inputs.m_Resources[13].pResource == &fakeAccelStruct);
+    VALIDATE(inputs.m_Resources[19].pResource == &fakeRwTypedBuf);
+    VALIDATE(inputs.m_Resources[20].pResource == &fakeRwStructBuf);
+    VALIDATE(inputs.m_Resources[21].pResource == &fakeRwRawBuf);
+    VALIDATE(inputs.m_Resources[22].pResource == &fakeLinearSampl);
+    VALIDATE(inputs.m_Resources[23].pResource == &fakeShadowSampl);
 
     // Texture SRVs also have the simple overload — it leaves mip/slice at their defaults.
     inputs.SetTex1d    (&fakeTex);  // non-array
@@ -197,16 +200,16 @@ static bool TestSimpleSetterOverload()
     inputs.SetTex1dArray(&fakeTex); // array
     inputs.SetTex2dArray(&fakeTex); // array
 
-    assert(inputs.m_Resources[1].pResource  == &fakeTex);  // m_Tex1d
-    assert(inputs.m_Resources[3].pResource  == &fakeTex);  // m_Tex2d
-    assert(inputs.m_Resources[7].pResource  == &fakeTex);  // m_Tex3d
-    assert(inputs.m_Resources[2].pResource  == &fakeTex);  // m_Tex1dArray
-    assert(inputs.m_Resources[4].pResource  == &fakeTex);  // m_Tex2dArray
+    VALIDATE(inputs.m_Resources[1].pResource  == &fakeTex);  // m_Tex1d
+    VALIDATE(inputs.m_Resources[3].pResource  == &fakeTex);  // m_Tex2d
+    VALIDATE(inputs.m_Resources[7].pResource  == &fakeTex);  // m_Tex3d
+    VALIDATE(inputs.m_Resources[2].pResource  == &fakeTex);  // m_Tex1dArray
+    VALIDATE(inputs.m_Resources[4].pResource  == &fakeTex);  // m_Tex2dArray
     // Mip/slice fields must remain at defaults when using the simple overload
-    assert(inputs.m_Resources[3].baseMipLevel   ==  0);
-    assert(inputs.m_Resources[3].numMipLevels   == -1);
-    assert(inputs.m_Resources[3].baseArraySlice ==  0);
-    assert(inputs.m_Resources[3].numArraySlices == -1);
+    VALIDATE(inputs.m_Resources[3].baseMipLevel   ==  0);
+    VALIDATE(inputs.m_Resources[3].numMipLevels   == -1);
+    VALIDATE(inputs.m_Resources[3].baseArraySlice ==  0);
+    VALIDATE(inputs.m_Resources[3].numArraySlices == -1);
 
     printf("  [PASS] Simple void* setter works for all non-texture resources and texture SRVs\n");
     return true;
@@ -222,28 +225,28 @@ static bool TestTextureSrvMipSliceOverload()
     // Non-array Texture_SRV: 3-param (baseMip, numMips); baseArraySlice/numArraySlices stay default.
     inputs.SetTex2d(&fakeTex, /*baseMip=*/2, /*numMips=*/3);
 
-    assert(inputs.m_Resources[3].pResource      == &fakeTex);
-    assert(inputs.m_Resources[3].baseMipLevel   ==  2);
-    assert(inputs.m_Resources[3].numMipLevels   ==  3);
-    assert(inputs.m_Resources[3].baseArraySlice ==  0);  // untouched default
-    assert(inputs.m_Resources[3].numArraySlices == -1);  // untouched default
+    VALIDATE(inputs.m_Resources[3].pResource      == &fakeTex);
+    VALIDATE(inputs.m_Resources[3].baseMipLevel   ==  2);
+    VALIDATE(inputs.m_Resources[3].numMipLevels   ==  3);
+    VALIDATE(inputs.m_Resources[3].baseArraySlice ==  0);  // untouched default
+    VALIDATE(inputs.m_Resources[3].numArraySlices == -1);  // untouched default
 
     // Array Texture_SRV: 5-param (baseMip, numMips, baseSlice, numSlices).
     inputs.SetTex2dArray(&fakeTex, /*baseMip=*/0, /*numMips=*/-1, /*baseSlice=*/4, /*numSlices=*/2);
 
-    assert(inputs.m_Resources[4].pResource      == &fakeTex);
-    assert(inputs.m_Resources[4].baseMipLevel   ==  0);
-    assert(inputs.m_Resources[4].numMipLevels   == -1);
-    assert(inputs.m_Resources[4].baseArraySlice ==  4);
-    assert(inputs.m_Resources[4].numArraySlices ==  2);
+    VALIDATE(inputs.m_Resources[4].pResource      == &fakeTex);
+    VALIDATE(inputs.m_Resources[4].baseMipLevel   ==  0);
+    VALIDATE(inputs.m_Resources[4].numMipLevels   == -1);
+    VALIDATE(inputs.m_Resources[4].baseArraySlice ==  4);
+    VALIDATE(inputs.m_Resources[4].numArraySlices ==  2);
 
     // Non-array Texture_SRV simple unbind followed by 3-param rebind.
     inputs.SetTexCube(nullptr);
-    assert(inputs.m_Resources[8].pResource == nullptr);
+    VALIDATE(inputs.m_Resources[8].pResource == nullptr);
     inputs.SetTexCube(&fakeTex, 1, -1);
-    assert(inputs.m_Resources[8].pResource    == &fakeTex);
-    assert(inputs.m_Resources[8].baseMipLevel ==  1);
-    assert(inputs.m_Resources[8].numMipLevels == -1);
+    VALIDATE(inputs.m_Resources[8].pResource    == &fakeTex);
+    VALIDATE(inputs.m_Resources[8].baseMipLevel ==  1);
+    VALIDATE(inputs.m_Resources[8].numMipLevels == -1);
 
     printf("  [PASS] Texture_SRV 3-param (non-array) and 5-param (array) setters correct\n");
     return true;
@@ -271,13 +274,13 @@ static bool TestAllTextureSrvKindsSetterOverload()
 
     for (uint32_t i = 0; i < 9u; ++i)
     {
-        assert(inputs.m_Resources[i].pResource == &fake);
-        assert(inputs.m_Resources[i].type == srrhi::ResourceType::Texture_SRV);
+        VALIDATE(inputs.m_Resources[i].pResource == &fake);
+        VALIDATE(inputs.m_Resources[i].type == srrhi::ResourceType::Texture_SRV);
     }
     // Verify array types have their slice params set
-    assert(inputs.m_Resources[3].baseArraySlice == 2);  // tex2dArray
-    assert(inputs.m_Resources[3].numArraySlices == 3);
-    assert(inputs.m_Resources[8].numArraySlices == 6);  // texCubeArray
+    VALIDATE(inputs.m_Resources[3].baseArraySlice == 2);  // tex2dArray
+    VALIDATE(inputs.m_Resources[3].numArraySlices == 3);
+    VALIDATE(inputs.m_Resources[8].numArraySlices == 6);  // texCubeArray
 
     printf("  [PASS] All 9 Texture_SRV kinds accept correct overload (3-param or 5-param)\n");
     return true;
@@ -293,18 +296,18 @@ static bool TestTextureUavFourParamOverload()
     // Non-array Texture_UAV: 2-param (baseMip only).
     inputs.SetRwTex2d(&fakeUav, /*baseMip=*/3);
 
-    assert(inputs.m_Resources[16].pResource    == &fakeUav);
-    assert(inputs.m_Resources[16].baseMipLevel ==  3);
-    assert(inputs.m_Resources[16].numMipLevels ==  1);  // always 1 for Texture_UAV
+    VALIDATE(inputs.m_Resources[16].pResource    == &fakeUav);
+    VALIDATE(inputs.m_Resources[16].baseMipLevel ==  3);
+    VALIDATE(inputs.m_Resources[16].numMipLevels ==  1);  // always 1 for Texture_UAV
 
     // Array Texture_UAV: 4-param (baseMip, baseSlice, numSlices).
     inputs.SetRwTex2dArray(&fakeUav, /*baseMip=*/0, /*baseSlice=*/2, /*numSlices=*/4);
 
-    assert(inputs.m_Resources[17].pResource      == &fakeUav);
-    assert(inputs.m_Resources[17].baseMipLevel   ==  0);
-    assert(inputs.m_Resources[17].numMipLevels   ==  1);  // always 1 for Texture_UAV
-    assert(inputs.m_Resources[17].baseArraySlice ==  2);
-    assert(inputs.m_Resources[17].numArraySlices ==  4);
+    VALIDATE(inputs.m_Resources[17].pResource      == &fakeUav);
+    VALIDATE(inputs.m_Resources[17].baseMipLevel   ==  0);
+    VALIDATE(inputs.m_Resources[17].numMipLevels   ==  1);  // always 1 for Texture_UAV
+    VALIDATE(inputs.m_Resources[17].baseArraySlice ==  2);
+    VALIDATE(inputs.m_Resources[17].numArraySlices ==  4);
 
     printf("  [PASS] Texture_UAV 2-param (non-array) and 4-param (array) setters correct\n");
     return true;
@@ -328,14 +331,14 @@ static bool TestAllTextureUavKindsSetterOverload()
 
     for (uint32_t i = 0; i < 5u; ++i)
     {
-        assert(inputs.m_Resources[i].pResource    == &fake);
-        assert(inputs.m_Resources[i].numMipLevels == 1);
-        assert(inputs.m_Resources[i].type         == srrhi::ResourceType::Texture_UAV);
+        VALIDATE(inputs.m_Resources[i].pResource    == &fake);
+        VALIDATE(inputs.m_Resources[i].numMipLevels == 1);
+        VALIDATE(inputs.m_Resources[i].type         == srrhi::ResourceType::Texture_UAV);
     }
     // Verify array types have their slice params set
-    assert(inputs.m_Resources[1].baseMipLevel   == 1);  // rwTex1dArray
-    assert(inputs.m_Resources[3].baseArraySlice == 4);  // rwTex2dArray
-    assert(inputs.m_Resources[3].numArraySlices == 2);
+    VALIDATE(inputs.m_Resources[1].baseMipLevel   == 1);  // rwTex1dArray
+    VALIDATE(inputs.m_Resources[3].baseArraySlice == 4);  // rwTex2dArray
+    VALIDATE(inputs.m_Resources[3].numArraySlices == 2);
 
     printf("  [PASS] All 5 Texture_UAV kinds: 2-param (non-array) or 4-param (array), numMipLevels=1\n");
     return true;
@@ -346,18 +349,18 @@ static bool TestNonTextureUavSimpleSetterDoesNotWriteMips()
 {
     AllUavInputs inputs;
 
-    assert(inputs.m_Resources[5].numMipLevels == -1);  // rwTypedBuffer (TypedBuffer_UAV)
-    assert(inputs.m_Resources[6].numMipLevels == -1);  // rwStructBuf   (StructuredBuffer_UAV)
-    assert(inputs.m_Resources[7].numMipLevels == -1);  // rwRawBuf      (RawBuffer_UAV)
+    VALIDATE(inputs.m_Resources[5].numMipLevels == -1);  // rwTypedBuffer (TypedBuffer_UAV)
+    VALIDATE(inputs.m_Resources[6].numMipLevels == -1);  // rwStructBuf   (StructuredBuffer_UAV)
+    VALIDATE(inputs.m_Resources[7].numMipLevels == -1);  // rwRawBuf      (RawBuffer_UAV)
 
     int buf = 0;
     inputs.SetRwTypedBuffer(&buf);
     inputs.SetRwStructBuf  (&buf);
     inputs.SetRwRawBuf     (&buf);
 
-    assert(inputs.m_Resources[5].numMipLevels == -1);
-    assert(inputs.m_Resources[6].numMipLevels == -1);
-    assert(inputs.m_Resources[7].numMipLevels == -1);
+    VALIDATE(inputs.m_Resources[5].numMipLevels == -1);
+    VALIDATE(inputs.m_Resources[6].numMipLevels == -1);
+    VALIDATE(inputs.m_Resources[7].numMipLevels == -1);
 
     printf("  [PASS] Non-texture UAV simple setters do not write numMipLevels\n");
     return true;
@@ -368,23 +371,23 @@ static bool TestAllSrvResourceTypes()
 {
     AllSrvInputs inputs;
 
-    assert(inputs.m_Resources[0].type  == srrhi::ResourceType::Texture_SRV);            // Texture1D
-    assert(inputs.m_Resources[1].type  == srrhi::ResourceType::Texture_SRV);            // Texture1DArray
-    assert(inputs.m_Resources[2].type  == srrhi::ResourceType::Texture_SRV);            // Texture2D
-    assert(inputs.m_Resources[3].type  == srrhi::ResourceType::Texture_SRV);            // Texture2DArray
-    assert(inputs.m_Resources[4].type  == srrhi::ResourceType::Texture_SRV);            // Texture2DMS
-    assert(inputs.m_Resources[5].type  == srrhi::ResourceType::Texture_SRV);            // Texture2DMSArray
-    assert(inputs.m_Resources[6].type  == srrhi::ResourceType::Texture_SRV);            // Texture3D
-    assert(inputs.m_Resources[7].type  == srrhi::ResourceType::Texture_SRV);            // TextureCube
-    assert(inputs.m_Resources[8].type  == srrhi::ResourceType::Texture_SRV);            // TextureCubeArray
-    assert(inputs.m_Resources[9].type  == srrhi::ResourceType::TypedBuffer_SRV);        // Buffer<T>
-    assert(inputs.m_Resources[10].type == srrhi::ResourceType::StructuredBuffer_SRV);   // StructuredBuffer<T>
-    assert(inputs.m_Resources[11].type == srrhi::ResourceType::RawBuffer_SRV);          // ByteAddressBuffer
-    assert(inputs.m_Resources[12].type == srrhi::ResourceType::RayTracingAccelStruct);  // RTAS
+    VALIDATE(inputs.m_Resources[0].type  == srrhi::ResourceType::Texture_SRV);            // Texture1D
+    VALIDATE(inputs.m_Resources[1].type  == srrhi::ResourceType::Texture_SRV);            // Texture1DArray
+    VALIDATE(inputs.m_Resources[2].type  == srrhi::ResourceType::Texture_SRV);            // Texture2D
+    VALIDATE(inputs.m_Resources[3].type  == srrhi::ResourceType::Texture_SRV);            // Texture2DArray
+    VALIDATE(inputs.m_Resources[4].type  == srrhi::ResourceType::Texture_SRV);            // Texture2DMS
+    VALIDATE(inputs.m_Resources[5].type  == srrhi::ResourceType::Texture_SRV);            // Texture2DMSArray
+    VALIDATE(inputs.m_Resources[6].type  == srrhi::ResourceType::Texture_SRV);            // Texture3D
+    VALIDATE(inputs.m_Resources[7].type  == srrhi::ResourceType::Texture_SRV);            // TextureCube
+    VALIDATE(inputs.m_Resources[8].type  == srrhi::ResourceType::Texture_SRV);            // TextureCubeArray
+    VALIDATE(inputs.m_Resources[9].type  == srrhi::ResourceType::TypedBuffer_SRV);        // Buffer<T>
+    VALIDATE(inputs.m_Resources[10].type == srrhi::ResourceType::StructuredBuffer_SRV);   // StructuredBuffer<T>
+    VALIDATE(inputs.m_Resources[11].type == srrhi::ResourceType::RawBuffer_SRV);          // ByteAddressBuffer
+    VALIDATE(inputs.m_Resources[12].type == srrhi::ResourceType::RayTracingAccelStruct);  // RTAS
 
-    assert(inputs.m_Resources[0].slot  == AllSrvInputs::Tex1dRegisterIndex);
-    assert(inputs.m_Resources[9].slot  == AllSrvInputs::TypedBufferRegisterIndex);
-    assert(inputs.m_Resources[12].slot == AllSrvInputs::AccelStructRegisterIndex);
+    VALIDATE(inputs.m_Resources[0].slot  == AllSrvInputs::Tex1dRegisterIndex);
+    VALIDATE(inputs.m_Resources[9].slot  == AllSrvInputs::TypedBufferRegisterIndex);
+    VALIDATE(inputs.m_Resources[12].slot == AllSrvInputs::AccelStructRegisterIndex);
 
     printf("  [PASS] All SRV resource type mappings are correct\n");
     return true;
@@ -395,18 +398,18 @@ static bool TestAllUavResourceTypes()
 {
     AllUavInputs inputs;
 
-    assert(inputs.m_Resources[0].type == srrhi::ResourceType::Texture_UAV);           // RWTexture1D
-    assert(inputs.m_Resources[1].type == srrhi::ResourceType::Texture_UAV);           // RWTexture1DArray
-    assert(inputs.m_Resources[2].type == srrhi::ResourceType::Texture_UAV);           // RWTexture2D
-    assert(inputs.m_Resources[3].type == srrhi::ResourceType::Texture_UAV);           // RWTexture2DArray
-    assert(inputs.m_Resources[4].type == srrhi::ResourceType::Texture_UAV);           // RWTexture3D
-    assert(inputs.m_Resources[5].type == srrhi::ResourceType::TypedBuffer_UAV);       // RWBuffer<T>
-    assert(inputs.m_Resources[6].type == srrhi::ResourceType::StructuredBuffer_UAV);  // RWStructuredBuffer<T>
-    assert(inputs.m_Resources[7].type == srrhi::ResourceType::RawBuffer_UAV);         // RWByteAddressBuffer
+    VALIDATE(inputs.m_Resources[0].type == srrhi::ResourceType::Texture_UAV);           // RWTexture1D
+    VALIDATE(inputs.m_Resources[1].type == srrhi::ResourceType::Texture_UAV);           // RWTexture1DArray
+    VALIDATE(inputs.m_Resources[2].type == srrhi::ResourceType::Texture_UAV);           // RWTexture2D
+    VALIDATE(inputs.m_Resources[3].type == srrhi::ResourceType::Texture_UAV);           // RWTexture2DArray
+    VALIDATE(inputs.m_Resources[4].type == srrhi::ResourceType::Texture_UAV);           // RWTexture3D
+    VALIDATE(inputs.m_Resources[5].type == srrhi::ResourceType::TypedBuffer_UAV);       // RWBuffer<T>
+    VALIDATE(inputs.m_Resources[6].type == srrhi::ResourceType::StructuredBuffer_UAV);  // RWStructuredBuffer<T>
+    VALIDATE(inputs.m_Resources[7].type == srrhi::ResourceType::RawBuffer_UAV);         // RWByteAddressBuffer
 
-    assert(inputs.m_Resources[0].slot == AllUavInputs::RwTex1dRegisterIndex);
-    assert(inputs.m_Resources[5].slot == AllUavInputs::RwTypedBufferRegisterIndex);
-    assert(inputs.m_Resources[7].slot == AllUavInputs::RwRawBufRegisterIndex);
+    VALIDATE(inputs.m_Resources[0].slot == AllUavInputs::RwTex1dRegisterIndex);
+    VALIDATE(inputs.m_Resources[5].slot == AllUavInputs::RwTypedBufferRegisterIndex);
+    VALIDATE(inputs.m_Resources[7].slot == AllUavInputs::RwRawBufRegisterIndex);
 
     printf("  [PASS] All UAV resource type mappings are correct\n");
     return true;
@@ -417,17 +420,17 @@ static bool TestSamplerOnlyPass()
 {
     SamplerOnlyPass inputs;
 
-    assert(inputs.m_Resources[0].type == srrhi::ResourceType::Sampler);
-    assert(inputs.m_Resources[1].type == srrhi::ResourceType::Sampler);
-    assert(inputs.m_Resources[0].slot == SamplerOnlyPass::LinearSamplerRegisterIndex);
-    assert(inputs.m_Resources[1].slot == SamplerOnlyPass::ShadowSamplerRegisterIndex);
+    VALIDATE(inputs.m_Resources[0].type == srrhi::ResourceType::Sampler);
+    VALIDATE(inputs.m_Resources[1].type == srrhi::ResourceType::Sampler);
+    VALIDATE(inputs.m_Resources[0].slot == SamplerOnlyPass::LinearSamplerRegisterIndex);
+    VALIDATE(inputs.m_Resources[1].slot == SamplerOnlyPass::ShadowSamplerRegisterIndex);
 
     int fakeSampler = 0;
     inputs.SetLinearSampler(&fakeSampler);
     inputs.SetShadowSampler(&fakeSampler);
 
-    assert(inputs.m_Resources[0].pResource == &fakeSampler);
-    assert(inputs.m_Resources[1].pResource == &fakeSampler);
+    VALIDATE(inputs.m_Resources[0].pResource == &fakeSampler);
+    VALIDATE(inputs.m_Resources[1].pResource == &fakeSampler);
 
     printf("  [PASS] Sampler-only pass has correct resource count, types, and setters\n");
     return true;
@@ -443,15 +446,15 @@ static bool TestMixedPassResourceOrdering()
     // m_Resources[1] = albedoTex  (Texture_SRV Texture2D, t0)
     // m_Resources[2] = normalTex  (Texture_SRV Texture2D, t1)
     // m_Resources[3] = outputTex  (Texture_UAV RWTexture2D, u0)
-    assert(inputs.m_Resources[0].type == srrhi::ResourceType::ConstantBuffer);
-    assert(inputs.m_Resources[1].type == srrhi::ResourceType::Texture_SRV);
-    assert(inputs.m_Resources[2].type == srrhi::ResourceType::Texture_SRV);
-    assert(inputs.m_Resources[3].type == srrhi::ResourceType::Texture_UAV);
+    VALIDATE(inputs.m_Resources[0].type == srrhi::ResourceType::ConstantBuffer);
+    VALIDATE(inputs.m_Resources[1].type == srrhi::ResourceType::Texture_SRV);
+    VALIDATE(inputs.m_Resources[2].type == srrhi::ResourceType::Texture_SRV);
+    VALIDATE(inputs.m_Resources[3].type == srrhi::ResourceType::Texture_UAV);
 
-    assert(inputs.m_Resources[0].slot == GBufferPass::FrameRegisterIndex);
-    assert(inputs.m_Resources[1].slot == GBufferPass::AlbedoTexRegisterIndex);
-    assert(inputs.m_Resources[2].slot == GBufferPass::NormalTexRegisterIndex);
-    assert(inputs.m_Resources[3].slot == GBufferPass::OutputTexRegisterIndex);
+    VALIDATE(inputs.m_Resources[0].slot == GBufferPass::FrameRegisterIndex);
+    VALIDATE(inputs.m_Resources[1].slot == GBufferPass::AlbedoTexRegisterIndex);
+    VALIDATE(inputs.m_Resources[2].slot == GBufferPass::NormalTexRegisterIndex);
+    VALIDATE(inputs.m_Resources[3].slot == GBufferPass::OutputTexRegisterIndex);
 
     int fakeFrame  = 0;
     int fakeTex    = 1;
@@ -462,13 +465,13 @@ static bool TestMixedPassResourceOrdering()
     inputs.SetNormalTex (&fakeTex, 2,  4);   // Texture2D SRV: 3-param (non-array)
     inputs.SetOutputTex (&fakeOutput, 1);    // RWTexture2D UAV: 2-param (non-array)
 
-    assert(inputs.m_Resources[0].pResource == &fakeFrame);
-    assert(inputs.m_Resources[1].pResource == &fakeTex);
-    assert(inputs.m_Resources[2].baseMipLevel == 2);
-    assert(inputs.m_Resources[2].numMipLevels == 4);
-    assert(inputs.m_Resources[3].pResource    == &fakeOutput);
-    assert(inputs.m_Resources[3].baseMipLevel == 1);
-    assert(inputs.m_Resources[3].numMipLevels == 1);   // hardcoded to 1 for Texture_UAV
+    VALIDATE(inputs.m_Resources[0].pResource == &fakeFrame);
+    VALIDATE(inputs.m_Resources[1].pResource == &fakeTex);
+    VALIDATE(inputs.m_Resources[2].baseMipLevel == 2);
+    VALIDATE(inputs.m_Resources[2].numMipLevels == 4);
+    VALIDATE(inputs.m_Resources[3].pResource    == &fakeOutput);
+    VALIDATE(inputs.m_Resources[3].baseMipLevel == 1);
+    VALIDATE(inputs.m_Resources[3].numMipLevels == 1);   // hardcoded to 1 for Texture_UAV
 
     printf("  [PASS] GBufferPass: correct ordering, simple/3-param/2-param setters all work\n");
     return true;
@@ -482,14 +485,14 @@ static bool TestRebindResource()
 
     // Texture2D SRV uses the 3-param overload (non-array)
     inputs.SetTex2d(&tex1, 0, -1);
-    assert(inputs.m_Resources[3].pResource == &tex1);
+    VALIDATE(inputs.m_Resources[3].pResource == &tex1);
 
     inputs.SetTex2d(&tex2, 0, -1);
-    assert(inputs.m_Resources[3].pResource == &tex2);
+    VALIDATE(inputs.m_Resources[3].pResource == &tex2);
 
     // Unbind via simple overload
     inputs.SetTex2d(nullptr);
-    assert(inputs.m_Resources[3].pResource == nullptr);
+    VALIDATE(inputs.m_Resources[3].pResource == nullptr);
 
     printf("  [PASS] Re-binding resource (calling setter multiple times) works correctly\n");
     return true;
@@ -505,9 +508,9 @@ static bool TestIndependentInstances()
     inputsA.SetTex2d(&texA, 0, -1);
     inputsB.SetTex2d(&texB, 0, -1);
 
-    assert(inputsA.m_Resources[3].pResource == &texA);
-    assert(inputsB.m_Resources[3].pResource == &texB);
-    assert(inputsA.m_Resources[3].pResource != inputsB.m_Resources[3].pResource);
+    VALIDATE(inputsA.m_Resources[3].pResource == &texA);
+    VALIDATE(inputsB.m_Resources[3].pResource == &texB);
+    VALIDATE(inputsA.m_Resources[3].pResource != inputsB.m_Resources[3].pResource);
 
     printf("  [PASS] Independent srinput instances have independent m_Resources[] arrays\n");
     return true;
