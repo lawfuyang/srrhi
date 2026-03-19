@@ -4,6 +4,7 @@
 #include <deque>
 #include <variant>
 #include <memory>
+#include <cstdarg>
 
 // ---------------------------------------------------------------------------
 // Forward declarations
@@ -287,6 +288,20 @@ struct LayoutMember
 // Logging
 // ---------------------------------------------------------------------------
 void LogMsg(const char* fmt, ...);
+
+// g_Verbose is defined in main.cpp; set by -v / --verbose / --test flags.
+extern bool g_Verbose;
+
+// VerboseMsg: like LogMsg but only emits output when g_Verbose is true.
+// Use this for all diagnostic logging outside of main.cpp.
+inline void VerboseMsg(const char* fmt, ...)
+{
+    if (!g_Verbose) return;
+    va_list args;
+    va_start(args, fmt);
+    vprintf(fmt, args);
+    va_end(args);
+}
 
 // ---------------------------------------------------------------------------
 // Visualizer declarations (implemented in visualizer.cpp)

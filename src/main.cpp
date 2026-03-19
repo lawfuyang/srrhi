@@ -22,7 +22,7 @@ int RunReflectionTests(const fs::path& testInputDir);
 // ---------------------------------------------------------------------------
 // Global flags
 // ---------------------------------------------------------------------------
-static bool g_Verbose = false; // -v or --test enables visualizer output to stdout
+bool g_Verbose = false; // -v or --test enables visualizer output to stdout
 
 void LogMsg(const char* fmt, ...)
 {

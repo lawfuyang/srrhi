@@ -121,7 +121,7 @@ public:
 // ---------------------------------------------------------------------------
 std::vector<LayoutMember> ComputeLayouts(ParseResult& pr)
 {
-    LogMsg("[layout] Computing layouts for %zu buffer(s)...\n", pr.m_Buffers.size());
+    VerboseMsg("[layout] Computing layouts for %zu buffer(s)...\n", pr.m_Buffers.size());
 
     std::vector<LayoutMember> result;
     CBufferLayout algo;
@@ -133,23 +133,23 @@ std::vector<LayoutMember> ComputeLayouts(ParseResult& pr)
         auto* st = std::get_if<StructType*>(&bufMv.m_Type);
         if (!st || !*st)
         {
-            LogMsg("[layout]   WARNING: buffer has non-struct type, skipping\n");
+            VerboseMsg("[layout]   WARNING: buffer has non-struct type, skipping\n");
             continue;
         }
 
         StructType& bufStruct = **st;
-        LogMsg("[layout]   Laying out: %s\n", bufStruct.m_Name.c_str());
+        VerboseMsg("[layout]   Laying out: %s\n", bufStruct.m_Name.c_str());
 
         LayoutMember lm = algo.Generate(bufStruct);
         lm.m_Name      = bufStruct.m_Name;  // cbuffer name from the buffer struct
         lm.m_bIsCBuffer = true;
         lm.m_bIsGlobal  = true;
 
-        LogMsg("[layout]     Total size: %d bytes\n", lm.m_Size);
+        VerboseMsg("[layout]     Total size: %d bytes\n", lm.m_Size);
         result.push_back(std::move(lm));
     }
 
-    LogMsg("[layout] Done\n");
+    VerboseMsg("[layout] Done\n");
 
     // Validate push constant sizes after all layouts are computed.
     // D3D12 push constants (root constants) must be < 256 bytes.
