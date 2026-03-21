@@ -23,7 +23,7 @@ echo. >> "%output_file%"
 REM Step 1: Build srrhi.exe (and validation stubs) from source
 echo Step 1: Building ALL_BUILD target... >> "%output_file%"
 echo. >> "%output_file%"
-cmake --build "%PROJECT_ROOT%\build" --config Release --target ALL_BUILD >> "%output_file%" 2>&1
+cmake --build "%PROJECT_ROOT%\build" --config Release --target ALL_BUILD --parallel >> "%output_file%" 2>&1
 echo Exit code: !errorlevel! >> "%output_file%"
 echo ALL_BUILD completed >> "%output_file%"
 echo. >> "%output_file%"
@@ -48,7 +48,7 @@ echo. >> "%output_file%"
 REM Step 4: Rebuild validation stubs that now include the updated headers
 echo Step 4: Rebuilding validation stubs... >> "%output_file%"
 echo. >> "%output_file%"
-cmake --build "%PROJECT_ROOT%\build" --config Release --target ALL_BUILD >> "%output_file%" 2>&1
+cmake --build "%PROJECT_ROOT%\build" --config Release --target ALL_BUILD --parallel >> "%output_file%" 2>&1
 echo Exit code: !errorlevel! >> "%output_file%"
 echo Rebuild completed >> "%output_file%"
 echo. >> "%output_file%"
