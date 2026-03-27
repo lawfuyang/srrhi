@@ -5,6 +5,7 @@
 #include <variant>
 #include <memory>
 #include <cstdarg>
+#include <unordered_set>
 
 // ---------------------------------------------------------------------------
 // Forward declarations
@@ -253,11 +254,20 @@ struct FlatSrInput
 // ---------------------------------------------------------------------------
 struct ParseResult
 {
-    std::deque<StructType>      m_Structs;
-    std::deque<StructType>      m_BufferDefs;
-    std::vector<MemberVariable> m_Buffers;
-    std::vector<SrInputDef>     m_SrInputDefs;
-    std::string                 m_SourceFile;
+    std::deque<StructType>           m_Structs;
+    std::deque<StructType>           m_BufferDefs;
+    std::vector<MemberVariable>      m_Buffers;
+    std::vector<SrInputDef>          m_SrInputDefs;
+    std::string                      m_SourceFile;
+
+    // Include tracking: direct #include directives (in declaration order).
+    // Each entry is the path string as written in the .sr file (e.g. "base.sr").
+    std::vector<std::string>         m_DirectIncludes;
+
+    // Names of ALL structs that originated from included files (transitively).
+    // Generators use this to skip re-emitting struct definitions already
+    // covered by the emitted #include directives.
+    std::unordered_set<std::string>  m_IncludedStructNames;
 };
 
 // ---------------------------------------------------------------------------

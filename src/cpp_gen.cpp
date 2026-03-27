@@ -566,12 +566,28 @@ std::string GenerateCpp(const ParseResult& pr,
             out << "#include \"srrhi.h\"\n";
     }
 
+    // Emit #include directives for each directly included .sr file.
+    // This avoids re-emitting struct definitions already present in those files.
+    for (const auto& incFile : pr.m_DirectIncludes)
+    {
+        // Derive the .h filename: replace the .sr extension with .h
+        std::string hName = incFile;
+        const std::string srExt = ".sr";
+        if (hName.size() > srExt.size() &&
+            hName.substr(hName.size() - srExt.size()) == srExt)
+        {
+            hName = hName.substr(0, hName.size() - srExt.size()) + ".h";
+        }
+        out << "#include \"" << hName << "\"\n";
+    }
+
     out << "\n";
     out << "namespace srrhi\n{\n\n";
 
-    // Named struct definitions (remain as plain structs)
+    // Named struct definitions (remain as plain structs) — skip those from includes.
     for (const auto& st : pr.m_Structs)
     {
+        if (pr.m_IncludedStructNames.count(st.m_Name)) continue;
         int localPadCount = 0;
         EmitStructCpp(out, st, localPadCount);
     }

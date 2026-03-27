@@ -283,6 +283,15 @@ struct Parser
         size_t baseIdx = m_Result.m_Structs.size() - entries.size();
         for (size_t i = baseIdx; i < m_Result.m_Structs.size(); ++i)
             FixupMembers(m_Result.m_Structs[i].m_Members, remap);
+
+        // Track include for code-gen: record the direct include and all struct
+        // names from this include (including its own transitive includes) so
+        // generators can emit a #include directive instead of re-emitting defs.
+        m_Result.m_DirectIncludes.push_back(includeFile);
+        for (auto& [oldPtr, name] : entries)
+            m_Result.m_IncludedStructNames.insert(name);
+        for (const auto& name : inc.m_IncludedStructNames)
+            m_Result.m_IncludedStructNames.insert(name);
     }
 
     // -----------------------------------------------------------------------

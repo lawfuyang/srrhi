@@ -277,6 +277,107 @@ static std::string BuildDummyEntryPoint(
 }
 
 // ---------------------------------------------------------------------------
+// Custom DXC include handler.
+// Resolves #include "foo.hlsli" references by lazily parsing the corresponding
+// "foo.sr" file from testInputDir, generating its HLSL, wrapping with an
+// include guard, and caching the result for reuse.
+// ---------------------------------------------------------------------------
+class HlslIncludeHandler : public IDxcIncludeHandler
+{
+    IDxcUtils*   m_pUtils;
+    fs::path     m_testInputDir;
+    std::unordered_map<std::string, std::string>& m_cache; // hlsli name -> wrapped content
+    ULONG        m_refCount = 1;
+
+    static std::string MakeGuard(const std::string& stem)
+    {
+        std::string g = stem + "_HLSLI";
+        for (char& c : g)
+            c = std::isalnum((unsigned char)c) ? (char)std::toupper((unsigned char)c) : '_';
+        return g;
+    }
+
+public:
+    HlslIncludeHandler(IDxcUtils* pUtils, const fs::path& dir,
+                       std::unordered_map<std::string, std::string>& cache)
+        : m_pUtils(pUtils), m_testInputDir(dir), m_cache(cache) {}
+
+    HRESULT STDMETHODCALLTYPE LoadSource(LPCWSTR pFilename, IDxcBlob** ppIncludeSource) override
+    {
+        if (!pFilename || !ppIncludeSource) return E_INVALIDARG;
+        *ppIncludeSource = nullptr;
+
+        // Extract just the base filename (strip any leading path from DXC).
+        std::wstring wPath(pFilename);
+        auto slash  = wPath.rfind(L'/');
+        auto bslash = wPath.rfind(L'\\');
+        auto sep = (slash  == std::wstring::npos) ? bslash
+                 : (bslash == std::wstring::npos) ? slash
+                 : std::max(slash, bslash);
+        std::wstring wBase = (sep != std::wstring::npos) ? wPath.substr(sep + 1) : wPath;
+        std::string hlsliName(wBase.begin(), wBase.end()); // e.g. "test_include_base.hlsli"
+
+        // Populate cache on first encountering this file.
+        if (!m_cache.count(hlsliName))
+        {
+            const std::string hlsliExt = ".hlsli";
+            if (hlsliName.size() <= hlsliExt.size() ||
+                hlsliName.substr(hlsliName.size() - hlsliExt.size()) != hlsliExt)
+                return E_FAIL;
+
+            std::string srName = hlsliName.substr(0, hlsliName.size() - hlsliExt.size()) + ".sr";
+            std::string srPath = (m_testInputDir / srName).string();
+
+            try
+            {
+                ParseResult incPr = ParseFile(srPath);
+                std::vector<LayoutMember> incLayouts = ComputeLayouts(incPr);
+                int incPadCount = 10000;
+                std::string hlsl = GenerateHlsl(incPr, incLayouts, incPadCount);
+
+                std::string stem  = fs::path(srName).stem().string();
+                std::string guard = MakeGuard(stem);
+                m_cache[hlsliName] = "#ifndef "  + guard + "\n"
+                                   + "#define "  + guard + "\n"
+                                   + "\n"
+                                   + hlsl
+                                   + "#endif // " + guard + "\n";
+            }
+            catch (const std::exception&) { return E_FAIL; }
+        }
+
+        const std::string& content = m_cache[hlsliName];
+        ComPtr<IDxcBlobEncoding> pBlob;
+        HRESULT hr = m_pUtils->CreateBlob(
+            content.c_str(), static_cast<UINT32>(content.size()), DXC_CP_UTF8, &pBlob);
+        if (FAILED(hr)) return hr;
+        *ppIncludeSource = pBlob.Detach();
+        return S_OK;
+    }
+
+    // IUnknown
+    ULONG   STDMETHODCALLTYPE AddRef()  override { return ++m_refCount; }
+    ULONG   STDMETHODCALLTYPE Release() override
+    {
+        ULONG r = --m_refCount;
+        if (r == 0) delete this;
+        return r;
+    }
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppv) override
+    {
+        if (!ppv) return E_POINTER;
+        if (riid == __uuidof(IUnknown) || riid == __uuidof(IDxcIncludeHandler))
+        {
+            *ppv = static_cast<IDxcIncludeHandler*>(this);
+            AddRef();
+            return S_OK;
+        }
+        *ppv = nullptr;
+        return E_NOINTERFACE;
+    }
+};
+
+// ---------------------------------------------------------------------------
 // Compile hlslSource with DXC and return the reflected cbuffers.
 // Returns empty vector if compilation fails; outErrors receives the error text.
 // ---------------------------------------------------------------------------
@@ -285,7 +386,8 @@ static std::vector<ReflectedCBuffer> CompileAndReflect(
     IDxcCompiler3*      pCompiler,
     const std::string&  hlslSource,
     const std::unordered_map<std::string, int>& ourMembers,   // for pad filtering
-    std::string&        outErrors)
+    std::string&        outErrors,
+    IDxcIncludeHandler* pIncludeHandler = nullptr)
 {
     outErrors.clear();
 
@@ -319,7 +421,7 @@ static std::vector<ReflectedCBuffer> CompileAndReflect(
     hr = pCompiler->Compile(
         &srcBuf,
         args, static_cast<UINT32>(std::size(args)),
-        nullptr,              // no include handler — generated HLSL has no #include
+        pIncludeHandler,
         IID_PPV_ARGS(&pResult));
     if (FAILED(hr))
         throw std::runtime_error("DXC: Compile() call failed (internal error)");
@@ -509,6 +611,9 @@ int RunReflectionTests(const fs::path& testInputDir)
     if (FAILED(hr))
         throw std::runtime_error("Failed to create IDxcCompiler3");
 
+    // Cache for HlslIncludeHandler: maps "foo.hlsli" -> guard-wrapped HLSL content.
+    // Populated on demand when DXC resolves #include directives.
+    std::unordered_map<std::string, std::string> hlslIncludeCache;
 
 
     // ---- Collect .sr files -------------------------------------------------
@@ -667,9 +772,10 @@ int RunReflectionTests(const fs::path& testInputDir)
         std::vector<ReflectedCBuffer> reflected;
         try
         {
+            HlslIncludeHandler incHandler(pUtils.Get(), testInputDir, hlslIncludeCache);
             reflected = CompileAndReflect(
                 pUtils.Get(), pCompiler.Get(),
-                hlslFull, ourMembers, dxcErrors);
+                hlslFull, ourMembers, dxcErrors, &incHandler);
         }
         catch (const std::exception& e)
         {
