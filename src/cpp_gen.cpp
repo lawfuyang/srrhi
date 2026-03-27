@@ -778,6 +778,28 @@ std::string GenerateCpp(const ParseResult& pr,
         // Register space: always taken from the top-level srinput (not nested srinputs)
         out << "    static constexpr uint32_t RegisterSpace = " << std::max(0, srInputDef.m_RegisterSpace) << ";\n";
 
+        // PushConstantBytes: size of the push constant struct (if any), or 0 if none
+        {
+            uint32_t pushConstantBytes = 0;
+            for (const auto& member : flat.m_Members)
+            {
+                if (member.m_bIsPushConstant)
+                {
+                    // Find the layout for this cbuffer to get its size
+                    for (const auto& lm : layouts)
+                    {
+                        if (lm.m_Name == member.m_CBufferName)
+                        {
+                            pushConstantBytes = lm.m_Size;
+                            break;
+                        }
+                    }
+                    break;  // Only one push constant allowed per srinput
+                }
+            }
+            out << "    static constexpr uint32_t PushConstantBytes = " << pushConstantBytes << ";\n";
+        }
+
         // Compose cbuffer structs directly as member variables (inlined from nested srinputs too)
         if (!flat.m_Members.empty())
         {
