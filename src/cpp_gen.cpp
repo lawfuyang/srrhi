@@ -182,6 +182,32 @@ static bool IsCppScalarPassByValue(const std::string& typeName)
 }
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Returns true if the layout member (a struct field) has any padding anywhere
+// in its submember tree — either trailing padding on the struct itself, or
+// any internal padding between its submembers.
+// When a struct has no padding, its C++ layout matches the HLSL cbuffer layout
+// exactly and we can emit it as the typed struct instead of a byte array.
+// ---------------------------------------------------------------------------
+static bool StructLayoutHasPadding(const LayoutMember& lm)
+{
+    // Trailing padding after the struct itself
+    if (lm.m_Padding > 0)
+        return true;
+    // Internal padding: check gaps between consecutive submembers
+    for (size_t i = 0; i < lm.m_Submembers.size(); ++i)
+    {
+        const LayoutMember& sub = lm.m_Submembers[i];
+        if (sub.m_Padding > 0)
+            return true;
+        // Recurse into nested structs
+        if (std::holds_alternative<StructType*>(sub.m_Type))
+            if (StructLayoutHasPadding(sub))
+                return true;
+    }
+    return false;
+}
+
 // SetterInfo: describes how to emit a public setter for one member
 // ---------------------------------------------------------------------------
 struct SetterInfo
@@ -210,9 +236,19 @@ static std::vector<SetterInfo> CollectSetterInfos(
 
         if (auto* sp = std::get_if<StructType*>(&mv.m_Type))
         {
-            si.m_bIsByteArray  = true;
-            si.m_ByteArraySize = lm->m_Size;
-            si.m_StructTypeName = (*sp)->m_Name;
+            if (!StructLayoutHasPadding(*lm))
+            {
+                // No padding: use the typed struct directly (const ref setter)
+                si.m_CppType  = "srrhi::" + (*sp)->m_Name;
+                si.m_bByValue = false;
+            }
+            else
+            {
+                // Padding present: fall back to byte array + memcpy setter
+                si.m_bIsByteArray   = true;
+                si.m_ByteArraySize  = lm->m_Size;
+                si.m_StructTypeName = (*sp)->m_Name;
+            }
         }
         else if (std::holds_alternative<std::shared_ptr<ArrayNode>>(lm->m_Type))
         {
@@ -258,6 +294,7 @@ static std::vector<SetterInfo> CollectSetterInfos(
     return result;
 }
 
+// ---------------------------------------------------------------------------
 static void EmitPadding(std::ostringstream& out, int padBytes, int& padCount,
                         const std::string& ind)
 {
@@ -310,12 +347,22 @@ static void EmitMembersCpp(std::ostringstream& out,
         {
             if (!lm) { cursor = fieldOffset; continue; }
 
-            // Emit struct fields as byte arrays to match std140 cbuffer layout rules.
-            // std140 layout may add implicit padding within and after struct members;
-            // the computed size includes this padding. Using a byte array guarantees
-            // the layout matches the HLSL cbuffer without relying on C++ struct alignment.
-            // To initialize: create a real instance and use std::memcpy() to copy bytes.
-            out << ind << "uint8_t " << fieldName << "[" << lm->m_Size << "];\n";
+            if (!StructLayoutHasPadding(*lm))
+            {
+                // No padding anywhere in this struct's layout: its C++ layout matches
+                // the HLSL cbuffer layout exactly, so emit it as the typed struct.
+                out << ind << "srrhi::" << (*sp)->m_Name << " " << fieldName << ";\n";
+            }
+            else
+            {
+                // Emit struct fields as byte arrays to match std140 cbuffer layout rules.
+                // std140 layout adds implicit padding within or after this struct member;
+                // the computed size includes this padding. Using a byte array guarantees
+                // the layout matches the HLSL cbuffer without relying on C++ struct alignment.
+                // To initialize: create a real instance and use std::memcpy() to copy bytes.
+                out << ind << "uint8_t " << fieldName << "[" << lm->m_Size << "];";
+                out << "  // byte array: std140 adds padding inside/after '" << (*sp)->m_Name << "'\n";
+            }
             if (lm->m_Padding > 0)
                 EmitPadding(out, lm->m_Padding, padCount, ind);
             cursor = lm->m_Offset + lm->m_Size + lm->m_Padding;
