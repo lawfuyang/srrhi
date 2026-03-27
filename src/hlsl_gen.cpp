@@ -23,7 +23,7 @@ static std::string HlslTypeName(const TypeRef& t)
         const ArrayNode& arr = **ap;
         if (arr.m_bCreatedFromMatrix)
         {
-            // Reconstruct "scalarNxM" (or "row_major scalarNxM")
+            // Reconstruct as row_major matrix
             // Column-major (default): element.m_VectorSize = rows, arraySize = cols
             // Row-major:              element.m_VectorSize = cols, arraySize = rows
             const BuiltinType* elem = std::get_if<BuiltinType>(&arr.m_ElementType);
@@ -33,12 +33,9 @@ static std::string HlslTypeName(const TypeRef& t)
             int vs = elem->m_VectorSize;  // rows for col-major, cols for row-major
             int as = arr.m_ArraySize;     // cols for col-major, rows for row-major
 
-            std::string base;
-            if (!arr.m_bIsRowMajor)
-                base = elem->m_ScalarName + std::to_string(vs) + "x" + std::to_string(as);
-            else
-                base = "row_major " + elem->m_ScalarName +
-                       std::to_string(as) + "x" + std::to_string(vs);
+            // Always emit as row_major
+            std::string base = "row_major " + elem->m_ScalarName +
+                               std::to_string(as) + "x" + std::to_string(vs);
             return base;
         }
         // Regular array: recurse for element type name + [size]

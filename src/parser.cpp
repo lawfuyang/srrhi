@@ -311,14 +311,12 @@ struct Parser
     }
 
     TypeRef MakeArray(TypeRef elemType, int arraySize,
-                      bool bCreatedFromMatrix = false,
-                      bool bIsRowMajor = false) const
+                      bool bCreatedFromMatrix = false) const
     {
         auto node = std::make_shared<ArrayNode>();
         node->m_ElementType          = elemType;
         node->m_ArraySize            = arraySize;
         node->m_bCreatedFromMatrix  = bCreatedFromMatrix;
-        node->m_bIsRowMajor         = bIsRowMajor;
         node->m_Name = TypeDisplayName(node->m_ElementType) +
                      "[" + std::to_string(arraySize) + "]";
         return node;
@@ -327,7 +325,7 @@ struct Parser
     // -----------------------------------------------------------------------
     // matrix<T,r,c> or vector<T,n>
     // -----------------------------------------------------------------------
-    TypeRef ParseTemplateType(const std::string& keyword, bool bIsRowMajor)
+    TypeRef ParseTemplateType(const std::string& keyword)
     {
         bool bIsMatrix = (keyword == "matrix");
         std::string scalarKey = "float";
@@ -355,10 +353,9 @@ struct Parser
 
         if (bIsMatrix)
         {
-            if (bIsRowMajor) std::swap(vectorSize, arraySize);
             TypeRef elem = MakeBuiltin(*si, vectorSize, true);
             if (arraySize == 1) return elem;
-            return MakeArray(std::move(elem), arraySize, true, bIsRowMajor);
+            return MakeArray(std::move(elem), arraySize);
         }
         return MakeBuiltin(*si, vectorSize);
     }
@@ -385,7 +382,7 @@ struct Parser
         Advance();
 
         if (name == "matrix" || name == "vector")
-            return ParseTemplateType(name, bIsRowMajor);
+            return ParseTemplateType(name);
 
         // Check scalar type table (longest-match, table is already ordered)
         for (auto& [key, info] : g_Scalars)
@@ -433,7 +430,7 @@ struct Parser
                 int arraySize  = bIsRowMajor ? rows : cols;
                 TypeRef elem = MakeBuiltin(info, vectorSize, true);
                 if (arraySize == 1) return elem; // NxM where M=1 is just a vector
-                return MakeArray(std::move(elem), arraySize, true, bIsRowMajor);
+                return MakeArray(std::move(elem), arraySize);
             }
 
             // Starts with key but unrecognised suffix -> fall through to struct lookup
@@ -465,7 +462,7 @@ struct Parser
         }
         while (TryConsume(TokKind::LBracket));
 
-        return MakeArray(std::move(elemType), total, false, false);
+        return MakeArray(std::move(elemType), total);
     }
 
     // -----------------------------------------------------------------------

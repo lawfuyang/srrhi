@@ -45,7 +45,6 @@ struct ArrayNode
     int         m_ArraySize             = 0;
     std::string m_Name;                       // e.g. "float3[4]" or "float3x4"
     bool        m_bCreatedFromMatrix   = false;
-    bool        m_bIsRowMajor          = false;
 };
 
 // ---------------------------------------------------------------------------
