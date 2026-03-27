@@ -94,6 +94,9 @@ file(GLOB_RECURSE SOURCES
     "src/*.hpp"
 )
 
+# Exclude hlsl_runtime_test.cpp from main srrhi executable (it's a separate target)
+list(FILTER SOURCES EXCLUDE REGEX "hlsl_runtime_test\\.cpp$")
+
 add_executable(${PROJECT_NAME} ${SOURCES})
 
 target_include_directories(${PROJECT_NAME} PRIVATE "${DXC_INSTALL_DIR}/inc")
@@ -132,3 +135,34 @@ foreach(VALIDATION_FILE ${VALIDATION_SOURCES})
     
     message(STATUS "Created validation target: ${TARGET_NAME}")
 endforeach()
+
+# ============================================================================
+# HLSL runtime validation executable
+# Uses D3D12 (WARP software adapter) + DXC to compile and execute compute
+# shaders built from generated .hlsli files, then verifies the UAV output
+# matches expected bit-exact values.
+#
+# Usage:
+#   cd bin
+#   .\hlsl_runtime_validation.exe
+# ============================================================================
+
+add_executable(hlsl_runtime_validation
+    "${CMAKE_SOURCE_DIR}/src/hlsl_runtime_test.cpp"
+)
+
+target_include_directories(hlsl_runtime_validation
+    PRIVATE "${DXC_INSTALL_DIR}/inc"
+)
+
+target_link_libraries(hlsl_runtime_validation
+    PRIVATE "${DXC_INSTALL_DIR}/lib/x64/dxcompiler.lib"
+    PRIVATE d3d12
+    PRIVATE dxgi
+)
+
+set_target_properties(hlsl_runtime_validation PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
+)
+
+message(STATUS "Created HLSL runtime validation target: hlsl_runtime_validation")

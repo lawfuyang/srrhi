@@ -79,6 +79,18 @@ for /f "delims=" %%f in ('dir /b "%PROJECT_ROOT%\bin\validation_*.exe"') do (
     echo. >> "%output_file%"
 )
 
+REM Step 6: Run HLSL runtime validation (D3D12 + DXC shader execution tests)
+echo Step 6: Running hlsl_runtime_validation.exe... >> "%output_file%"
+echo. >> "%output_file%"
+echo Running: hlsl_runtime_validation.exe >> "%output_file%"
+echo -------------------------------- >> "%output_file%"
+"%PROJECT_ROOT%\bin\hlsl_runtime_validation.exe" >> "%output_file%" 2>&1
+set HLSL_RUNTIME_RESULT=!errorlevel!
+echo Exit code: !HLSL_RUNTIME_RESULT! >> "%output_file%"
+if !HLSL_RUNTIME_RESULT! neq 0 set FAILED_TESTS=!FAILED_TESTS!  - hlsl_runtime_validation.exe^
+echo hlsl_runtime_validation.exe completed >> "%output_file%"
+echo. >> "%output_file%"
+
 REM Final summary
 echo. >> "%output_file%"
 echo ================================== >> "%output_file%"
