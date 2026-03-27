@@ -137,7 +137,8 @@ static void ProcessFile(const fs::path& srFile,
                         const fs::path& inputRoot,
                         const fs::path& outputRoot,
                         int& globalPadCount,
-                        bool bEmitValidation)
+                        bool bEmitValidation,
+                        const fs::path& exePath)
 {
     LogMsg("[srrhi] Processing: %s\n", srFile.string().c_str());
 
@@ -202,12 +203,22 @@ static void ProcessFile(const fs::path& srFile,
     fs::path stem    = relPath.parent_path() / srFile.stem();
 
     // Returns true if outPath needs to be (re)written:
-    // either it doesn't exist yet, or its timestamp is older than the source .sr file.
+    // either it doesn't exist yet, or its timestamp is older than the source .sr file,
+    // or if the current executable is newer than outPath.
     auto NeedsWrite = [&](const fs::path& outPath) -> bool
     {
         if (bEmitValidation) return true; // In validation generation mode, always write stubs
         if (!fs::exists(outPath)) return true;
-        return fs::last_write_time(outPath) < fs::last_write_time(srFile);
+        
+        // Check if outPath is older than the source .sr file
+        if (fs::last_write_time(outPath) < fs::last_write_time(srFile))
+            return true;
+        
+        // Check if the current executable is newer than outPath
+        if (fs::last_write_time(outPath) < fs::last_write_time(exePath))
+            return true;
+
+        return false;
     };
 
     // --- Generate HLSL ---
@@ -402,12 +413,13 @@ int main(int argc, char* argv[])
     // --- Process each file ---
     int exitCode = 0;
     int globalPadCount = 0;
+    fs::path currentExe = fs::absolute(argv[0]);
 
     for (const auto& f : srFiles)
     {
         try
         {
-            ProcessFile(f, inputRoot, outputRoot, globalPadCount, runTests);
+            ProcessFile(f, inputRoot, outputRoot, globalPadCount, runTests, currentExe);
         }
         catch (const std::exception& e)
         {
