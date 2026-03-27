@@ -355,7 +355,7 @@ struct Parser
         {
             TypeRef elem = MakeBuiltin(*si, vectorSize, true);
             if (arraySize == 1) return elem;
-            return MakeArray(std::move(elem), arraySize);
+            return MakeArray(std::move(elem), arraySize, true);
         }
         return MakeBuiltin(*si, vectorSize);
     }
@@ -430,7 +430,7 @@ struct Parser
                 int arraySize  = bIsRowMajor ? rows : cols;
                 TypeRef elem = MakeBuiltin(info, vectorSize, true);
                 if (arraySize == 1) return elem; // NxM where M=1 is just a vector
-                return MakeArray(std::move(elem), arraySize);
+                return MakeArray(std::move(elem), arraySize, true);
             }
 
             // Starts with key but unrecognised suffix -> fall through to struct lookup
