@@ -25,8 +25,6 @@
 
 #pragma once
 
-#include <cstdint>
-
 namespace srrhi
 {
 
@@ -62,14 +60,6 @@ enum class ResourceType : uint32_t
     RayTracingAccelStruct,  ///< RaytracingAccelerationStructure SRV      (t# register)
     PushConstants,          ///< Push constants — reserved for future use (b# register)
 };
-
-// Returns true if 'type' is a texture resource (Texture_SRV or Texture_UAV).
-// Texture resources support mip-level and array-slice sub-resource selection.
-// Non-texture resources (buffers, samplers, cbuffers, etc.) ignore those fields.
-inline bool IsTexture(ResourceType type)
-{
-    return type == ResourceType::Texture_SRV || type == ResourceType::Texture_UAV;
-}
 
 // =============================================================================
 // ResourceEntry
