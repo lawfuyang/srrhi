@@ -1,0 +1,25 @@
+// Tests: nested #if / #ifdef blocks.
+// OUTER defined, INNER NOT defined → picks the float3/float2 branch.
+
+#define OUTER
+
+#ifdef OUTER
+    #ifdef INNER
+        #define MY_TYPE float4
+    #else
+        #define MY_TYPE float3
+    #endif
+#else
+    #define MY_TYPE float
+#endif
+
+cbuffer NestedCb
+{
+    MY_TYPE color;
+    float   alpha;
+};
+
+srinput NestedInputs
+{
+    NestedCb m_cb;
+};

@@ -1,0 +1,23 @@
+// Tests: #if MACRO == value to select type alias.
+// NUM_CHANNELS is defined as 3 → SPD_TYPE resolves to float3.
+
+#define NUM_CHANNELS 3
+
+#if NUM_CHANNELS == 3
+    #define SPD_TYPE float3
+#elif NUM_CHANNELS == 2
+    #define SPD_TYPE float2
+#else
+    #define SPD_TYPE float
+#endif
+
+cbuffer MipCb
+{
+    SPD_TYPE color;
+    float    alpha;
+};
+
+srinput MipInputs
+{
+    MipCb m_mip;
+};

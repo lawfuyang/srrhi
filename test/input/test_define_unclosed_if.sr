@@ -1,0 +1,10 @@
+// Error test: #if without a matching #endif should fail at parse time.
+
+#if defined(SOMETHING)
+
+cbuffer UnclosedCb
+{
+    float value;
+};
+
+// Missing #endif at end of file

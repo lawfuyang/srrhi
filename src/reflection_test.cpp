@@ -110,6 +110,11 @@ static const std::unordered_set<std::string> k_ExpectedFailStems = {
     "test_struct_array_srinput_const_forward_ref",
     "test_struct_array_srinput_const_bool_type",
     "test_struct_array_srinput_const_double_type",
+    // Preprocessor / type-alias error tests
+    "test_define_invalid_type",
+    "test_define_endif_without_if",
+    "test_define_unclosed_if",
+    "test_define_elif_after_else",
 };
 
 // ---------------------------------------------------------------------------

@@ -1,0 +1,9 @@
+// Error test: #elif after #else should fail at parse time.
+
+#ifdef FOO
+    #define THE_TYPE float4
+#else
+    #define THE_TYPE float
+#elif defined(BAR)
+    #define THE_TYPE float2
+#endif

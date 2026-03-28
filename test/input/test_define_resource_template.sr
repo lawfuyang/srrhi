@@ -1,0 +1,18 @@
+// Tests: type alias used as resource template argument in srinput.
+// SPD_TYPE resolves to float3 based on NUM_CHANNELS.
+
+#define NUM_CHANNELS 3
+
+#if NUM_CHANNELS == 3
+    #define SPD_TYPE float3
+#else
+    #define SPD_TYPE float
+#endif
+
+srinput SpdResourceInputs
+{
+    Texture2D<SPD_TYPE>   g_Mip0;
+    RWTexture2D<SPD_TYPE> g_Out1;
+    RWTexture2D<SPD_TYPE> g_Out2;
+    RWTexture2D<SPD_TYPE> g_Out3;
+};

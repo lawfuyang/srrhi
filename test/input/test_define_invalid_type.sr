@@ -1,0 +1,14 @@
+// Error test: #define with an invalid HLSL type should fail at parse time.
+// 'NotARealType' is not a builtin, not a struct, not a known alias.
+
+#define MY_BAD_TYPE NotARealType
+
+cbuffer BadCb
+{
+    MY_BAD_TYPE value;
+};
+
+srinput BadInputs
+{
+    BadCb m_cb;
+};

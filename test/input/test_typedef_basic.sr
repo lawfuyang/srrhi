@@ -1,0 +1,17 @@
+// Tests: typedef creates a type alias usable in struct and cbuffer members.
+
+typedef float4 MyVec4;
+typedef float  MyFloat;
+
+cbuffer TypedefCb
+{
+    MyVec4 position;
+    MyVec4 color;
+    MyFloat intensity;
+    uint   flags;
+};
+
+srinput TypedefInputs
+{
+    TypedefCb m_cb;
+};

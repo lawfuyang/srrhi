@@ -1,0 +1,8 @@
+// Error test: #endif without a matching #if should fail at parse time.
+
+cbuffer MismatchCb
+{
+    float value;
+};
+
+#endif

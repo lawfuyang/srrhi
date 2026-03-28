@@ -1,0 +1,21 @@
+// Tests: #ifndef and !defined() select the else/alternate branch.
+// FANCY is NOT defined → the simple float path is taken.
+
+#ifndef FANCY
+    #define DATA_TYPE float
+#else
+    #define DATA_TYPE float4
+#endif
+
+cbuffer NotDefCb
+{
+    DATA_TYPE x;
+    DATA_TYPE y;
+    DATA_TYPE z;
+    float     w;
+};
+
+srinput NotDefInputs
+{
+    NotDefCb m_cb;
+};

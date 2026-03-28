@@ -1,0 +1,22 @@
+// Tests: #if with logical && (both conditions true → WIDE_TYPE = float4).
+
+#define HAS_WIDE
+#define USE_FLOAT4
+
+#if defined(HAS_WIDE) && defined(USE_FLOAT4)
+    #define WIDE_TYPE float4
+#else
+    #define WIDE_TYPE float2
+#endif
+
+cbuffer AndCb
+{
+    WIDE_TYPE value;
+    float     factor;
+    uint      mode;
+};
+
+srinput AndInputs
+{
+    AndCb m_cb;
+};

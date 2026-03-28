@@ -1,0 +1,23 @@
+// Tests: #ifdef / #else to choose between two type aliases.
+// SPD_MULTICHANNEL is NOT defined here, so the #else branch is taken → SPD_TYPE = float.
+// The test verifies that conditional define selection works.
+
+#define SPD_MULTICHANNEL
+
+#ifdef SPD_MULTICHANNEL
+    #define SPD_TYPE float4
+#else
+    #define SPD_TYPE float
+#endif
+
+cbuffer SpdCb
+{
+    SPD_TYPE value0;
+    SPD_TYPE value1;
+    float    weight;
+};
+
+srinput SpdInputs
+{
+    SpdCb m_spd;
+};

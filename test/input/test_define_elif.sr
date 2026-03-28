@@ -1,0 +1,26 @@
+// Tests: #elif chain to verify proper branch selection.
+// QUALITY = 2 → MID_TYPE = float2 branch is taken.
+
+#define QUALITY 2
+
+#if QUALITY == 1
+    #define MID_TYPE float
+#elif QUALITY == 2
+    #define MID_TYPE float2
+#elif QUALITY == 3
+    #define MID_TYPE float3
+#else
+    #define MID_TYPE float4
+#endif
+
+cbuffer ElifCb
+{
+    MID_TYPE hdr;
+    float    exposure;
+    uint     tonemapper;
+};
+
+srinput ElifInputs
+{
+    ElifCb m_cb;
+};

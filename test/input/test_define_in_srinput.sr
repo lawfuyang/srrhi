@@ -1,0 +1,13 @@
+// Tests: #ifdef inside srinput body to conditionally include a resource.
+// ENABLE_SHADOW IS defined → shadow map resource is included.
+
+#define ENABLE_SHADOW
+
+srinput CondResourceInputs
+{
+    Texture2D<float4> g_AlbedoMap;
+#ifdef ENABLE_SHADOW
+    Texture2D<float>  g_ShadowMap;
+#endif
+    RWTexture2D<float4> g_Output;
+};

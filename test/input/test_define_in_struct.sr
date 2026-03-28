@@ -1,0 +1,26 @@
+// Tests: #if / #endif inside a struct body to conditionally include members.
+// ENABLE_EXTRA is defined → the extra members are included.
+
+#define ENABLE_EXTRA
+
+struct ConditionalStruct
+{
+    float4 baseColor;
+#ifdef ENABLE_EXTRA
+    float2 uvOffset;
+    float  uvScale;
+    uint   flags;
+#else
+    float  unused;
+#endif
+};
+
+cbuffer ConditionalCb
+{
+    ConditionalStruct data;
+};
+
+srinput ConditionalInputs
+{
+    ConditionalCb m_cb;
+};

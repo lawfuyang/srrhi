@@ -1,0 +1,19 @@
+// Tests: logical OR in #if condition.
+// Neither A nor B is defined → fallback float branch taken.
+
+#if defined(TYPE_A) || defined(TYPE_B)
+    #define OR_TYPE float4
+#else
+    #define OR_TYPE float
+#endif
+
+cbuffer OrCb
+{
+    OR_TYPE value;
+    uint    index;
+};
+
+srinput OrInputs
+{
+    OrCb m_cb;
+};

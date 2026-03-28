@@ -1,0 +1,19 @@
+// Tests: #if inside cbuffer body to conditionally include members.
+// EXTRA_DATA IS defined → both extra members are included.
+
+#define EXTRA_DATA
+
+cbuffer InCbufCb
+{
+    float4 baseValue;
+#if defined(EXTRA_DATA)
+    float4 extraA;
+    float  extraB;
+    uint   extraFlags;
+#endif
+};
+
+srinput InCbufInputs
+{
+    InCbufCb m_cb;
+};

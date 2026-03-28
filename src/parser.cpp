@@ -204,6 +204,31 @@ struct Parser
     // Maps srinput name to index in m_Result.m_SrInputDefs (indices are stable)
     std::unordered_map<std::string, size_t> m_SrInputMap;
 
+    // -------------------------------------------------------------------------
+    // Preprocessor state
+    // -------------------------------------------------------------------------
+    // Macro definitions: name → value string ("" for flag macros and type aliases).
+    std::unordered_map<std::string, std::string> m_Defines;
+    // Type aliases from #define, typedef, or using — name → resolved TypeRef.
+    std::unordered_map<std::string, TypeRef>     m_TypeAliases;
+
+    // Conditional compilation stack (#if / #ifdef / #else / #endif).
+    struct CondFrame
+    {
+        bool parentActive;    // outer context was active when this #if was entered
+        bool anyBranchTaken;  // at least one branch condition evaluated to true so far
+        bool currentlyActive; // current branch is live
+        bool inElse;          // have already processed an #else for this frame
+    };
+    std::vector<CondFrame> m_CondStack;
+
+    // True when code in the current context should be compiled.
+    bool IsActive() const
+    {
+        if (m_CondStack.empty()) return true;
+        return m_CondStack.back().currentlyActive;
+    }
+
     Parser(const std::string& src, ParseResult& r, const std::string& path)
         : m_Lex(src), m_Result(r), m_FilePath(path)
     {
@@ -231,6 +256,390 @@ struct Parser
     {
         Token t = Expect(TokKind::Number, "integer");
         return std::stoi(t.m_Text);
+    }
+
+    // -----------------------------------------------------------------------
+    // Skip all tokens whose line number equals 'line'.
+    // Used to consume the remainder of a preprocessor directive line.
+    // -----------------------------------------------------------------------
+    void SkipRestOfLine(int line)
+    {
+        while (m_Cur.m_Kind != TokKind::Eof && m_Cur.m_Line == line)
+            Advance();
+    }
+
+    // -----------------------------------------------------------------------
+    // Preprocessor condition evaluators for #if / #elif.
+    // All functions only consume tokens whose m_Line == condLine.
+    // Unknown/undefined macros silently evaluate to 0 (false).
+    // -----------------------------------------------------------------------
+    bool EvalPrimary(int condLine)
+    {
+        if (m_Cur.m_Kind == TokKind::Eof || m_Cur.m_Line != condLine)
+            return false;
+
+        // Parenthesised sub-expression: ( expr )
+        if (m_Cur.m_Kind == TokKind::Unknown && m_Cur.m_Text == "(")
+        {
+            Advance();
+            bool val = EvalOrExpr(condLine);
+            if (m_Cur.m_Line == condLine &&
+                m_Cur.m_Kind == TokKind::Unknown && m_Cur.m_Text == ")")
+                Advance();
+            return val;
+        }
+
+        // defined(MACRO) or defined MACRO
+        if (m_Cur.m_Kind == TokKind::Ident && m_Cur.m_Text == "defined")
+        {
+            Advance();
+            bool hasParen = (m_Cur.m_Line == condLine &&
+                             m_Cur.m_Kind == TokKind::Unknown && m_Cur.m_Text == "(");
+            if (hasParen) Advance();
+            std::string macroName;
+            if (m_Cur.m_Line == condLine && m_Cur.m_Kind == TokKind::Ident)
+            { macroName = m_Cur.m_Text; Advance(); }
+            if (hasParen && m_Cur.m_Line == condLine &&
+                m_Cur.m_Kind == TokKind::Unknown && m_Cur.m_Text == ")")
+                Advance();
+            return m_Defines.count(macroName) > 0 || m_TypeAliases.count(macroName) > 0;
+        }
+
+        // Identifier: macro reference with optional comparison operator
+        if (m_Cur.m_Kind == TokKind::Ident)
+        {
+            std::string macroName = m_Cur.m_Text;
+            Advance();
+
+            if (m_Cur.m_Kind != TokKind::Eof && m_Cur.m_Line == condLine)
+            {
+                std::string opStr;
+                if (m_Cur.m_Kind == TokKind::LAngle)          // '<' or '<='
+                {
+                    opStr = "<"; Advance();
+                    if (m_Cur.m_Line == condLine && m_Cur.m_Kind == TokKind::Unknown &&
+                        m_Cur.m_Text == "=")
+                    { opStr = "<="; Advance(); }
+                }
+                else if (m_Cur.m_Kind == TokKind::RAngle)     // '>' or '>='
+                {
+                    opStr = ">"; Advance();
+                    if (m_Cur.m_Line == condLine && m_Cur.m_Kind == TokKind::Unknown &&
+                        m_Cur.m_Text == "=")
+                    { opStr = ">="; Advance(); }
+                }
+                else if (m_Cur.m_Kind == TokKind::Unknown)
+                {
+                    char ch = m_Cur.m_Text[0];
+                    if (ch == '=')
+                    {
+                        opStr = "="; Advance();
+                        if (m_Cur.m_Line == condLine && m_Cur.m_Kind == TokKind::Unknown &&
+                            m_Cur.m_Text == "=")
+                        { opStr = "=="; Advance(); }
+                    }
+                    else if (ch == '!')
+                    {
+                        // Peek ahead: '!' followed by '=' is the '!=' operator.
+                        Token pk = m_Lex.Peek();
+                        if (pk.m_Kind == TokKind::Unknown && pk.m_Text == "=")
+                        { opStr = "!="; Advance(); Advance(); }
+                        // else: standalone '!' belongs to the outer not_expr; leave it.
+                    }
+                }
+
+                if (!opStr.empty() && opStr != "=") // bare single "=" is a syntax error; ignore
+                {
+                    std::string rhs;
+                    if (m_Cur.m_Line == condLine)
+                    {
+                        if (m_Cur.m_Kind == TokKind::Number)
+                        { rhs = m_Cur.m_Text; Advance(); }
+                        else if (m_Cur.m_Kind == TokKind::Ident)
+                        { rhs = m_Cur.m_Text; Advance(); }
+                    }
+                    std::string lhs = "0";
+                    auto it = m_Defines.find(macroName);
+                    if (it != m_Defines.end())
+                        lhs = it->second.empty() ? "1" : it->second;
+
+                    if (opStr == "==") return lhs == rhs;
+                    if (opStr == "!=") return lhs != rhs;
+                    try
+                    {
+                        int l = std::stoi(lhs), r = std::stoi(rhs);
+                        if (opStr == "<")  return l <  r;
+                        if (opStr == "<=") return l <= r;
+                        if (opStr == ">")  return l >  r;
+                        if (opStr == ">=") return l >= r;
+                    }
+                    catch (...) {}
+                    return false;
+                }
+            }
+
+            // No operator: truthy if macro is defined and non-zero
+            auto it = m_Defines.find(macroName);
+            if (it != m_Defines.end())
+            {
+                if (it->second.empty()) return true; // flag macro
+                try { return std::stoi(it->second) != 0; } catch (...) { return true; }
+            }
+            if (m_TypeAliases.count(macroName)) return true; // type alias counts as defined
+            return false; // undefined = 0
+        }
+
+        // Numeric literal
+        if (m_Cur.m_Kind == TokKind::Number)
+        {
+            int val = 0;
+            try { val = std::stoi(m_Cur.m_Text); } catch (...) {}
+            Advance();
+            return val != 0;
+        }
+
+        Advance(); // unknown token: skip and return false
+        return false;
+    }
+
+    bool EvalNotExpr(int condLine)
+    {
+        if (m_Cur.m_Kind != TokKind::Eof && m_Cur.m_Line == condLine &&
+            m_Cur.m_Kind == TokKind::Unknown && m_Cur.m_Text == "!")
+        {
+            Advance(); // consume '!'  (always logical NOT here; '!=' is handled in EvalPrimary)
+            return !EvalNotExpr(condLine);
+        }
+        return EvalPrimary(condLine);
+    }
+
+    bool EvalAndExpr(int condLine)
+    {
+        bool val = EvalNotExpr(condLine);
+        while (m_Cur.m_Kind != TokKind::Eof && m_Cur.m_Line == condLine &&
+               m_Cur.m_Kind == TokKind::Unknown && m_Cur.m_Text == "&")
+        {
+            Advance(); // first '&'
+            if (m_Cur.m_Kind == TokKind::Unknown && m_Cur.m_Text == "&") Advance(); // second '&'
+            bool rhs = EvalNotExpr(condLine);
+            val = val && rhs;
+        }
+        return val;
+    }
+
+    bool EvalOrExpr(int condLine)
+    {
+        bool val = EvalAndExpr(condLine);
+        while (m_Cur.m_Kind != TokKind::Eof && m_Cur.m_Line == condLine &&
+               m_Cur.m_Kind == TokKind::Unknown && m_Cur.m_Text == "|")
+        {
+            Advance(); // first '|'
+            if (m_Cur.m_Kind == TokKind::Unknown && m_Cur.m_Text == "|") Advance(); // second '|'
+            bool rhs = EvalAndExpr(condLine);
+            val = val || rhs;
+        }
+        return val;
+    }
+
+    // Evaluate a full condition expression on 'condLine', consume all tokens on
+    // that line, and return the boolean result.
+    bool EvalConditionLine(int condLine)
+    {
+        bool result = EvalOrExpr(condLine);
+        SkipRestOfLine(condLine); // discard any remaining tokens on the condition line
+        return result;
+    }
+
+    // -----------------------------------------------------------------------
+    // Central handler for all preprocessor directives.
+    // Called after '#' has already been consumed; m_Cur is at the keyword.
+    // -----------------------------------------------------------------------
+    void HandlePreprocessorDirective(int hashLine)
+    {
+        if (m_Cur.m_Kind != TokKind::Ident)
+        { SkipRestOfLine(hashLine); return; }
+
+        // #include — ParseInclude expects m_Cur still pointing at "include"
+        if (m_Cur.m_Text == "include")
+        {
+            if (!IsActive()) { SkipRestOfLine(hashLine); return; }
+            ParseInclude(hashLine);
+            return;
+        }
+
+        std::string directive = m_Cur.m_Text;
+        Advance(); // consume directive keyword
+
+        // ---- #pragma ----
+        if (directive == "pragma")
+        {
+            if (!IsActive()) { SkipRestOfLine(hashLine); return; }
+            if (m_Cur.m_Kind == TokKind::Ident && m_Cur.m_Line == hashLine &&
+                (m_Cur.m_Text == "pack" || m_Cur.m_Text == "pack_matrix"))
+            {
+                std::string pt = m_Cur.m_Text;
+                LogMsg("[parser] ERROR: forbidden '#pragma %s' directive at line %d\n",
+                       pt.c_str(), hashLine);
+                throw std::runtime_error(m_FilePath + ":" + std::to_string(hashLine) +
+                                         ": '#pragma " + pt + "' is not allowed in this file format");
+            }
+            SkipRestOfLine(hashLine);
+            return;
+        }
+
+        // ---- #define ----
+        if (directive == "define")
+        {
+            if (!IsActive()) { SkipRestOfLine(hashLine); return; }
+            if (m_Cur.m_Kind != TokKind::Ident || m_Cur.m_Line != hashLine)
+            { SkipRestOfLine(hashLine); return; }
+            Token macroName = m_Cur;
+            Advance();
+            if (m_Cur.m_Kind == TokKind::Eof || m_Cur.m_Line != hashLine)
+            {
+                // Flag macro: #define FOO
+                m_Defines[macroName.m_Text] = "";
+            }
+            else if (m_Cur.m_Kind == TokKind::Number && m_Cur.m_Line == hashLine)
+            {
+                // Numeric macro: #define FOO 3
+                m_Defines[macroName.m_Text] = m_Cur.m_Text;
+                Advance();
+                SkipRestOfLine(hashLine);
+            }
+            else if (m_Cur.m_Kind == TokKind::Ident && m_Cur.m_Line == hashLine)
+            {
+                // Type-alias macro: #define FOO float3
+                // Parse and validate the type using the standard type parser.
+                try
+                {
+                    TypeRef aliasType = ParseNonStructType();
+                    m_TypeAliases[macroName.m_Text] = std::move(aliasType);
+                    m_Defines[macroName.m_Text] = ""; // also mark defined for defined() checks
+                }
+                catch (const std::exception& e)
+                {
+                    throw std::runtime_error(m_FilePath + ":" + std::to_string(hashLine) +
+                                             ": '#define " + macroName.m_Text +
+                                             "' value is not a valid HLSL type: " + e.what());
+                }
+                SkipRestOfLine(hashLine);
+            }
+            else
+            {
+                throw std::runtime_error(m_FilePath + ":" + std::to_string(hashLine) +
+                                         ": '#define " + macroName.m_Text +
+                                         "': value must be a valid HLSL type name or an integer literal");
+            }
+            return;
+        }
+
+        // ---- #undef ----
+        if (directive == "undef")
+        {
+            if (!IsActive()) { SkipRestOfLine(hashLine); return; }
+            if (m_Cur.m_Kind == TokKind::Ident && m_Cur.m_Line == hashLine)
+            {
+                m_Defines.erase(m_Cur.m_Text);
+                m_TypeAliases.erase(m_Cur.m_Text);
+                Advance();
+            }
+            SkipRestOfLine(hashLine);
+            return;
+        }
+
+        // ---- #ifdef ----
+        if (directive == "ifdef")
+        {
+            bool parentActive = IsActive();
+            bool cond = false;
+            if (m_Cur.m_Kind == TokKind::Ident && m_Cur.m_Line == hashLine)
+            {
+                std::string n = m_Cur.m_Text; Advance();
+                cond = m_Defines.count(n) > 0 || m_TypeAliases.count(n) > 0;
+            }
+            SkipRestOfLine(hashLine);
+            bool curr = parentActive && cond;
+            m_CondStack.push_back({parentActive, curr, curr, false});
+            return;
+        }
+
+        // ---- #ifndef ----
+        if (directive == "ifndef")
+        {
+            bool parentActive = IsActive();
+            bool cond = false;
+            if (m_Cur.m_Kind == TokKind::Ident && m_Cur.m_Line == hashLine)
+            {
+                std::string n = m_Cur.m_Text; Advance();
+                cond = m_Defines.count(n) == 0 && m_TypeAliases.count(n) == 0;
+            }
+            SkipRestOfLine(hashLine);
+            bool curr = parentActive && cond;
+            m_CondStack.push_back({parentActive, curr, curr, false});
+            return;
+        }
+
+        // ---- #if ----
+        if (directive == "if")
+        {
+            bool parentActive = IsActive();
+            bool cond = parentActive ? EvalConditionLine(hashLine)
+                                     : (SkipRestOfLine(hashLine), false);
+            bool curr = parentActive && cond;
+            m_CondStack.push_back({parentActive, curr, curr, false});
+            return;
+        }
+
+        // ---- #elif ----
+        if (directive == "elif")
+        {
+            if (m_CondStack.empty())
+                throw std::runtime_error(m_FilePath + ":" + std::to_string(hashLine) +
+                                         ": '#elif' without matching '#if'");
+            CondFrame& top = m_CondStack.back();
+            if (top.inElse)
+                throw std::runtime_error(m_FilePath + ":" + std::to_string(hashLine) +
+                                         ": '#elif' after '#else'");
+            bool canEval = top.parentActive && !top.anyBranchTaken;
+            bool cond    = canEval ? EvalConditionLine(hashLine)
+                                   : (SkipRestOfLine(hashLine), false);
+            bool newlyActive    = canEval && cond;
+            top.anyBranchTaken  = top.anyBranchTaken || newlyActive;
+            top.currentlyActive = newlyActive;
+            return;
+        }
+
+        // ---- #else ----
+        if (directive == "else")
+        {
+            if (m_CondStack.empty())
+                throw std::runtime_error(m_FilePath + ":" + std::to_string(hashLine) +
+                                         ": '#else' without matching '#if'");
+            CondFrame& top = m_CondStack.back();
+            if (top.inElse)
+                throw std::runtime_error(m_FilePath + ":" + std::to_string(hashLine) +
+                                         ": '#else' after '#else'");
+            SkipRestOfLine(hashLine);
+            top.currentlyActive = top.parentActive && !top.anyBranchTaken;
+            top.anyBranchTaken  = true;
+            top.inElse          = true;
+            return;
+        }
+
+        // ---- #endif ----
+        if (directive == "endif")
+        {
+            if (m_CondStack.empty())
+                throw std::runtime_error(m_FilePath + ":" + std::to_string(hashLine) +
+                                         ": '#endif' without matching '#if'");
+            m_CondStack.pop_back();
+            SkipRestOfLine(hashLine);
+            return;
+        }
+
+        // Unknown directive: skip the rest of the line silently.
+        SkipRestOfLine(hashLine);
     }
 
     // -----------------------------------------------------------------------
@@ -440,11 +849,23 @@ struct Parser
         }
 
         // Named struct reference
-        auto it = m_StructMap.find(name);
-        if (it == m_StructMap.end())
-            throw std::runtime_error(m_FilePath + ":" + std::to_string(nameLine) +
-                                     ": unrecognized type '" + name + "'");
-        return it->second; // StructType*
+        auto structIt = m_StructMap.find(name);
+        if (structIt != m_StructMap.end())
+            return structIt->second; // StructType*
+
+        // Type alias defined via #define, typedef, or using
+        auto aliasIt = m_TypeAliases.find(name);
+        if (aliasIt != m_TypeAliases.end())
+        {
+            if (bIsRowMajor)
+                throw std::runtime_error(m_FilePath + ":" + std::to_string(nameLine) +
+                                         ": row_major/column_major qualifier cannot be applied"
+                                         " to type alias '" + name + "'");
+            return aliasIt->second;
+        }
+
+        throw std::runtime_error(m_FilePath + ":" + std::to_string(nameLine) +
+                                 ": unrecognized type '" + name + "'");
     }
 
     // -----------------------------------------------------------------------
@@ -649,6 +1070,17 @@ struct Parser
         std::unordered_set<std::string> memberNames;
         while (!Check(TokKind::RBrace) && !Check(TokKind::Eof))
         {
+            // Handle preprocessor directives (#if/#ifdef/#define/etc.) inside struct/cbuffer body.
+            if (Check(TokKind::Hash))
+            {
+                int hashLine = m_Cur.m_Line;
+                Advance();
+                HandlePreprocessorDirective(hashLine);
+                continue;
+            }
+            // Skip member declarations in inactive preprocessor branches.
+            if (!IsActive()) { Advance(); continue; }
+
             size_t prevCount = members.size();
             ParseMemberVariables(members);
             // Check newly added members for duplicate names
@@ -699,42 +1131,17 @@ struct Parser
     {
         while (!Check(TokKind::Eof))
         {
-            // #include or other #pragma directives
+            // Preprocessor directives (#include, #define, #ifdef, #if, #else, #endif, …)
             if (Check(TokKind::Hash))
             {
                 int hashLine = m_Cur.m_Line;
                 Advance(); // consume '#'; m_Cur is now the directive keyword
-
-                // Handle #include
-                if (m_Cur.m_Kind == TokKind::Ident && m_Cur.m_Text == "include")
-                {
-                    // m_Cur is at "include" — ParseInclude picks up from here
-                    ParseInclude(hashLine);
-                    continue;
-                }
-
-                // Reject #pragma pack and #pragma pack_matrix directives
-                if (m_Cur.m_Kind == TokKind::Ident && m_Cur.m_Text == "pragma")
-                {
-                    Advance(); // consume 'pragma'
-                    if (m_Cur.m_Kind == TokKind::Ident && (m_Cur.m_Text == "pack" || m_Cur.m_Text == "pack_matrix"))
-                    {
-                        std::string pragmaType = m_Cur.m_Text;
-                        LogMsg("[parser] ERROR: forbidden '#pragma %s' directive at line %d\n", pragmaType.c_str(), hashLine);
-                        throw std::runtime_error(m_FilePath + ":" + std::to_string(hashLine) +
-                                                 ": '#pragma " + pragmaType + "' is not allowed in this file format");
-                    }
-                    // Skip unknown pragmas (advance until next '#' or EOF)
-                    while (!Check(TokKind::Eof) && !Check(TokKind::Hash))
-                        Advance();
-                    continue;
-                }
-
-                // Skip unknown hash directives
-                while (!Check(TokKind::Eof) && !Check(TokKind::Hash))
-                    Advance();
+                HandlePreprocessorDirective(hashLine);
                 continue;
             }
+
+            // Skip top-level declarations that fall inside an inactive preprocessor branch.
+            if (!IsActive()) { Advance(); continue; }
 
             // ---- Optional [space(N)] attribute before 'srinput' ----
             int pendingRegisterSpace = -1;
@@ -983,6 +1390,17 @@ struct Parser
 
                 while (!Check(TokKind::RBrace) && !Check(TokKind::Eof))
                 {
+                    // Handle preprocessor directives inside srinput body.
+                    if (Check(TokKind::Hash))
+                    {
+                        int hashLine = m_Cur.m_Line;
+                        Advance();
+                        HandlePreprocessorDirective(hashLine);
+                        continue;
+                    }
+                    // Skip declarations in inactive preprocessor branches.
+                    if (!IsActive()) { Advance(); continue; }
+
                     // ---- Attribute annotation: [push_constant] ----
                     bool bNextIsPushConstant = false;
                     if (Check(TokKind::LBracket))
@@ -1283,7 +1701,7 @@ struct Parser
 
                         if (!bNoTemplateArg && Check(TokKind::LAngle))
                         {
-                            // Parse <templateArg> — may be a builtin type or a struct name.
+                            // Parse <templateArg> — may be a builtin type, struct name, or type alias.
                             Advance(); // consume '<'
                             if (m_Cur.m_Kind != TokKind::Ident)
                                 throw std::runtime_error(m_FilePath + ":" + std::to_string(m_Cur.m_Line) +
@@ -1291,19 +1709,25 @@ struct Parser
                             Token argTok = m_Cur; Advance();
                             templateArg = argTok.m_Text;
 
-                            // Validate: if it looks like a struct name, it must be visible.
-                            // First check if it's a known builtin scalar/vector.
+                            // Resolve type alias if the token is a known macro / typedef / using.
+                            {
+                                auto aliasIt = m_TypeAliases.find(templateArg);
+                                if (aliasIt != m_TypeAliases.end())
+                                    templateArg = TypeDisplayName(aliasIt->second);
+                            }
+
+                            // Validate the resolved type: must be a visible builtin or struct.
                             bool bIsBuiltin = false;
                             for (auto& [key, info] : g_Scalars)
                                 if (templateArg.rfind(key, 0) == 0) { bIsBuiltin = true; break; }
 
                             if (!bIsBuiltin)
                             {
-                                // Must be a user-defined struct visible at this scope.
                                 if (m_StructMap.find(templateArg) == m_StructMap.end())
                                     throw std::runtime_error(m_FilePath + ":" + std::to_string(argTok.m_Line) +
-                                                             ": resource template argument '" + templateArg +
-                                                             "' is not a visible struct or builtin type");
+                                                             ": resource template argument '" + argTok.m_Text +
+                                                             "' (resolved as '" + templateArg +
+                                                             "') is not a visible struct or builtin type");
                             }
 
                             Expect(TokKind::RAngle, ">");
@@ -1467,16 +1891,39 @@ struct Parser
                 continue;
             }
 
-            // ---- typedef (skipped) ----
+            // ---- typedef BaseType AliasName; ----
             if (kw == "typedef")
             {
-                while (!Check(TokKind::Semicolon) && !Check(TokKind::Eof)) Advance();
-                TryConsume(TokKind::Semicolon);
+                Advance(); // consume 'typedef'
+                TypeRef baseType = ParseNonStructType();
+                Token aliasName  = Expect(TokKind::Ident, "alias name after base type in typedef");
+                Expect(TokKind::Semicolon, ";");
+                m_TypeAliases[aliasName.m_Text] = std::move(baseType);
+                continue;
+            }
+
+            // ---- using AliasName = BaseType; ----
+            if (kw == "using")
+            {
+                Advance(); // consume 'using'
+                Token aliasName = Expect(TokKind::Ident, "alias name after 'using'");
+                if (m_Cur.m_Kind != TokKind::Unknown || m_Cur.m_Text != "=")
+                    throw std::runtime_error(m_FilePath + ":" + std::to_string(aliasName.m_Line) +
+                                             ": expected '=' after alias name in 'using' declaration");
+                Advance(); // consume '='
+                TypeRef baseType = ParseNonStructType();
+                Expect(TokKind::Semicolon, ";");
+                m_TypeAliases[aliasName.m_Text] = std::move(baseType);
                 continue;
             }
 
             Advance(); // unknown top-level keyword
         }
+
+        // Check that every #if / #ifdef has a matching #endif.
+        if (!m_CondStack.empty())
+            throw std::runtime_error(m_FilePath +
+                                     ": unclosed '#if' or '#ifdef' directive; missing '#endif'");
     }
 };
 

@@ -1,0 +1,17 @@
+// Tests: #define type alias used in cbuffer members and srinput.
+// Defines MY_COLOR as float4 and MY_SCALAR as float.
+
+#define MY_COLOR  float4
+#define MY_SCALAR float
+
+cbuffer DefBasicCb
+{
+    MY_COLOR  tint;
+    MY_SCALAR brightness;
+    uint      flags;
+};
+
+srinput DefineBasicInputs
+{
+    DefBasicCb m_cb;
+};

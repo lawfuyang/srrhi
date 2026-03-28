@@ -1,0 +1,17 @@
+// Tests: 'using' declaration creates a type alias usable in struct and cbuffer members.
+
+using MyVec3 = float3;
+using MyUint  = uint;
+
+cbuffer UsingCb
+{
+    MyVec3 direction;
+    float  magnitude;
+    MyUint packedFlags;
+    uint   index;
+};
+
+srinput UsingInputs
+{
+    UsingCb m_cb;
+};
