@@ -1,0 +1,14 @@
+// Error test: srinput declared AFTER the struct that tries to use its const.
+// Expected: parse error "unknown srinput 'Config' referenced in array size;
+//           srinput must be declared before this struct/cbuffer"
+
+struct BadArray
+{
+    float values[Config::MaxLights];
+};
+
+// Config is declared too late — the struct above cannot see it.
+srinput Config
+{
+    static const uint MaxLights = 4;
+};

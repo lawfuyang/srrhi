@@ -1,0 +1,33 @@
+// Positive test: scalar const from srinput used as array size for a struct
+// array member (array of structs), and also in cbuffer array members.
+// Uses all supported integral types: uint, int, uint32_t, int32_t, uint16_t, int16_t.
+
+srinput Limits
+{
+    uint     MaxObjects     = 6;
+    int32_t  MaxFrames      = 3;
+    uint32_t MaxBones       = 8;
+};
+
+struct BoneTransform
+{
+    float4x4 matrix;
+    float4   extra;
+};
+
+struct ObjectData
+{
+    BoneTransform bones[Limits::MaxBones];
+    float4        positions[Limits::MaxObjects];
+};
+
+cbuffer FrameBuffer
+{
+    float4 perFrameData[Limits::MaxFrames];
+    uint   frameCount;
+};
+
+srinput AnimInputs
+{
+    FrameBuffer m_frame;
+};

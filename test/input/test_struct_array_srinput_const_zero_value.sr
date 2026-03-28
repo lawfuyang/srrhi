@@ -1,0 +1,12 @@
+// Error test: srinput scalar const with value 0 used as array size.
+// Expected: parse error "value 0 is not a valid array size (must be >= 1)"
+
+srinput Config
+{
+    static const uint ZeroSize = 0;
+};
+
+struct BadArray
+{
+    float values[Config::ZeroSize];
+};

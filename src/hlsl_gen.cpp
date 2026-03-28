@@ -117,9 +117,14 @@ static void EmitStructBodyHlsl(std::ostringstream& out,
             else
             {
                 // Regular array: emit "elementType name[size];"
+                // If the size came from a scalar const reference, append it as a comment.
                 out << fInd << HlslTypeName(arr.m_ElementType)
                     << " " << mv.m_Name
-                    << "[" << arr.m_ArraySize << "];\n";
+                    << "[" << arr.m_ArraySize << "]";
+                if (!arr.m_SizeExpr.empty())
+                    out << "; // " << arr.m_SizeExpr << "\n";
+                else
+                    out << ";\n";
             }
         }
         else

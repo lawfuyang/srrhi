@@ -102,6 +102,14 @@ static const std::unordered_set<std::string> k_ExpectedFailStems = {
     "test_srinput_inherit_name_clash_scalar",
     "test_srinput_inherit_name_clash_between_bases",
     "test_srinput_inherit_push_constant_multiple",
+    // Struct array size from srinput scalar const — error tests
+    "test_struct_array_srinput_const_unknown_srinput",
+    "test_struct_array_srinput_const_unknown_const",
+    "test_struct_array_srinput_const_nonintegral",
+    "test_struct_array_srinput_const_zero_value",
+    "test_struct_array_srinput_const_forward_ref",
+    "test_struct_array_srinput_const_bool_type",
+    "test_struct_array_srinput_const_double_type",
 };
 
 // ---------------------------------------------------------------------------
@@ -738,17 +746,24 @@ int RunReflectionTests(const fs::path& testInputDir)
         std::vector<LayoutMember> firstSrInputLayouts;
         if (!pr.m_SrInputDefs.empty())
         {
-            const auto& firstSrInput = pr.m_SrInputDefs[0];
-            for (const auto& member : firstSrInput.m_Members)
+            // Find the first srinput (in declaration order) that has at least one
+            // cbuffer member with a matching layout entry. Srinputs that contain
+            // only scalar consts, resources, or samplers (no cbuffers) are skipped.
+            for (const auto& srInput : pr.m_SrInputDefs)
             {
-                for (const auto& lm : layouts)
+                for (const auto& member : srInput.m_Members)
                 {
-                    if (lm.m_Name == member.m_CBufferName)
+                    for (const auto& lm : layouts)
                     {
-                        firstSrInputLayouts.push_back(lm);
-                        break;
+                        if (lm.m_Name == member.m_CBufferName)
+                        {
+                            firstSrInputLayouts.push_back(lm);
+                            break;
+                        }
                     }
                 }
+                if (!firstSrInputLayouts.empty())
+                    break;  // found the first srinput with cbuffer layouts
             }
         }
         else

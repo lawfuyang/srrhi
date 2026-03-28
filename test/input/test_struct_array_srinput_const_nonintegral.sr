@@ -1,0 +1,12 @@
+// Error test: float scalar const used as array size.
+// Expected: parse error "has type 'float', which cannot be used as an array size"
+
+srinput Config
+{
+    float MaxDistance = 100.0;
+};
+
+struct BadArray
+{
+    float values[Config::MaxDistance];
+};

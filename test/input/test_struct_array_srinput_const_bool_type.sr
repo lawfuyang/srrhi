@@ -1,0 +1,12 @@
+// Error test: bool scalar const used as array size.
+// Expected: parse error "has type 'bool', which cannot be used as an array size"
+
+srinput Config
+{
+    static const bool Enabled = true;
+};
+
+struct BadArray
+{
+    float values[Config::Enabled];
+};

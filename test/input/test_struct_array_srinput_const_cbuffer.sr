@@ -1,0 +1,22 @@
+// Positive test: srinput scalar const used as array size in a cbuffer member
+// with a second srinput that references this cbuffer. Verifies that layout
+// and validation stubs are generated correctly.
+
+srinput ArraySizes
+{
+    static const uint NumSamples = 4;
+    static const int  NumPasses  = 2;
+};
+
+cbuffer SampleBuffer
+{
+    float4 samples[ArraySizes::NumSamples];
+    float  weights[ArraySizes::NumSamples];
+    uint   passIdx[ArraySizes::NumPasses];
+    uint   numSamples;
+};
+
+srinput SampleInputs
+{
+    SampleBuffer m_samples;
+};

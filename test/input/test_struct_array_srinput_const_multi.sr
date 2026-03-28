@@ -1,0 +1,40 @@
+// Positive test: multiple srinputs each providing scalar consts used as
+// array sizes in the same struct.
+
+srinput GeometryConfig
+{
+    static const uint MaxVertices = 8;
+    static const uint MaxIndices  = 16;
+};
+
+srinput RenderConfig
+{
+    static const uint MaxMaterials = 3;
+    const int         MaxPasses    = 2;
+};
+
+struct GeometryBatch
+{
+    float3 positions[GeometryConfig::MaxVertices];
+    float2 uvs[GeometryConfig::MaxVertices];
+    uint   indices[GeometryConfig::MaxIndices];
+};
+
+struct RenderBatch
+{
+    float4 materialColors[RenderConfig::MaxMaterials];
+    uint   passIds[RenderConfig::MaxPasses];
+};
+
+cbuffer BatchData
+{
+    uint numBatches;
+    uint pad0;
+    uint pad1;
+    uint pad2;
+};
+
+srinput MainInputs
+{
+    BatchData m_batchData;
+};

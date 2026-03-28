@@ -1,0 +1,33 @@
+// Positive test: use a scalar const from another srinput as an array size
+// in a plain struct member declaration.
+
+srinput Config
+{
+    static const uint MaxLights = 4;
+    static const int  MaxShadows = 2;
+};
+
+struct LightEntry
+{
+    float4 color;
+    float  intensity;
+};
+
+struct LightArray
+{
+    LightEntry lights[Config::MaxLights];
+    float      shadowBias[Config::MaxShadows];
+    uint       count;
+};
+
+cbuffer LightData
+{
+    float4 positions[Config::MaxLights];
+    float  ranges[Config::MaxLights];
+    uint   numLights;
+};
+
+srinput MainInputs
+{
+    LightData m_lightData;
+};

@@ -44,6 +44,8 @@ struct ArrayNode
     TypeRef     m_ElementType;
     int         m_ArraySize             = 0;
     std::string m_Name;                       // e.g. "float3[4]" or "float3x4"
+    std::string m_SizeExpr;                   // non-empty when size was specified via a scalar const
+                                              // reference in the .sr file, e.g. "Config::MaxLights"
     bool        m_bCreatedFromMatrix   = false;
 };
 

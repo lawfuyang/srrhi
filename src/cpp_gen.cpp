@@ -592,11 +592,19 @@ static void EmitStructCpp(std::ostringstream& out, const StructType& st,
                 if (auto* elemBt = std::get_if<BuiltinType>(&arr.m_ElementType))
                 {
                     auto cti = MapBuiltinToCpp(*elemBt);
-                    out << fInd << cti.m_TypeName << " " << mv.m_Name << "[" << arr.m_ArraySize << "];\n";;
+                    out << fInd << cti.m_TypeName << " " << mv.m_Name << "[" << arr.m_ArraySize << "]";
+                    if (!arr.m_SizeExpr.empty())
+                        out << "; // " << arr.m_SizeExpr << "\n";
+                    else
+                        out << ";\n";
                 }
                 else if (auto* elemSp = std::get_if<StructType*>(&arr.m_ElementType))
                 {
-                    out << fInd << (*elemSp)->m_Name << " " << mv.m_Name << "[" << arr.m_ArraySize << "];\n";
+                    out << fInd << (*elemSp)->m_Name << " " << mv.m_Name << "[" << arr.m_ArraySize << "]";
+                    if (!arr.m_SizeExpr.empty())
+                        out << "; // " << arr.m_SizeExpr << "\n";
+                    else
+                        out << ";\n";
                 }
             }
         }

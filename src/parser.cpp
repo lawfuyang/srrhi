@@ -311,14 +311,16 @@ struct Parser
     }
 
     TypeRef MakeArray(TypeRef elemType, int arraySize,
-                      bool bCreatedFromMatrix = false) const
+                      bool bCreatedFromMatrix = false,
+                      const std::string& sizeExpr = "") const
     {
         auto node = std::make_shared<ArrayNode>();
         node->m_ElementType          = elemType;
         node->m_ArraySize            = arraySize;
         node->m_bCreatedFromMatrix  = bCreatedFromMatrix;
+        node->m_SizeExpr             = sizeExpr;
         node->m_Name = TypeDisplayName(node->m_ElementType) +
-                     "[" + std::to_string(arraySize) + "]";
+                       "[" + (sizeExpr.empty() ? std::to_string(arraySize) : sizeExpr) + "]";
         return node;
     }
 
@@ -446,23 +448,133 @@ struct Parser
     }
 
     // -----------------------------------------------------------------------
-    // Array dims: one or more [N], flattened to total count
+    // Returns true if the scalar type name is an integral type suitable for
+    // use as an array size (int, uint, and their fixed-width aliases).
+    // -----------------------------------------------------------------------
+    static bool IsIntegralScalarType(const std::string& typeName)
+    {
+        return typeName == "int"      || typeName == "uint"
+            || typeName == "int32_t"  || typeName == "uint32_t"
+            || typeName == "int16_t"  || typeName == "uint16_t"
+            || typeName == "int64_t"  || typeName == "uint64_t";
+    }
+
+    // -----------------------------------------------------------------------
+    // Array dims: one or more [N], flattened to total count.
+    // Also supports a single [SrInputName::ConstName] referencing a scalar
+    // const of integral type from a previously-declared srinput block.
     // -----------------------------------------------------------------------
     TypeRef ParseArrayDims(TypeRef elemType)
     {
         int total = 1;
+        std::string sizeExpr; // symbolic expression when size came from a scalar const ref
+        int iterCount = 0;
+
         do
         {
-            int n = ParseInteger();
-            if (n < 1)
-                throw std::runtime_error(m_FilePath + ":" + std::to_string(m_Cur.m_Line) +
-                                         ": array size must be >= 1");
-            total *= n;
+            ++iterCount;
+
+            if (m_Cur.m_Kind == TokKind::Ident)
+            {
+                // Possibly SrInputName::ConstName
+                int tokenLine = m_Cur.m_Line;
+                std::string srInputName = m_Cur.m_Text;
+                Advance(); // consume the identifier
+
+                // Expect first ':'
+                if (m_Cur.m_Kind != TokKind::Colon)
+                    throw std::runtime_error(m_FilePath + ":" + std::to_string(tokenLine) +
+                                             ": expected '::' after '" + srInputName +
+                                             "' in array size; use SrInputName::ConstName syntax");
+                Advance(); // consume first ':'
+
+                // Expect second ':'
+                if (m_Cur.m_Kind != TokKind::Colon)
+                    throw std::runtime_error(m_FilePath + ":" + std::to_string(tokenLine) +
+                                             ": expected second ':' in '::' for array size"
+                                             " (SrInputName::ConstName)");
+                Advance(); // consume second ':'
+
+                Token constNameTok = Expect(TokKind::Ident, "scalar constant name after '::'");
+
+                // Symbolic size must be the only dimension (no multi-dim chaining)
+                if (iterCount > 1 || total > 1)
+                    throw std::runtime_error(m_FilePath + ":" + std::to_string(tokenLine) +
+                                             ": scalar const reference '"
+                                             + srInputName + "::" + constNameTok.m_Text
+                                             + "' cannot be combined with other array dimensions");
+
+                // Look up srinput
+                auto srIt = m_SrInputMap.find(srInputName);
+                if (srIt == m_SrInputMap.end())
+                    throw std::runtime_error(m_FilePath + ":" + std::to_string(tokenLine) +
+                                             ": unknown srinput '" + srInputName
+                                             + "' referenced in array size"
+                                             + "; srinput must be declared before this struct/cbuffer");
+
+                const SrInputDef& srInputDef = m_Result.m_SrInputDefs[srIt->second];
+
+                // Find the scalar const by name
+                const ScalarConst* found = nullptr;
+                for (const auto& sc : srInputDef.m_ScalarConsts)
+                {
+                    if (sc.m_Name == constNameTok.m_Text)
+                    {
+                        found = &sc;
+                        break;
+                    }
+                }
+                if (!found)
+                    throw std::runtime_error(m_FilePath + ":" + std::to_string(tokenLine) +
+                                             ": srinput '" + srInputName + "' has no scalar const named '"
+                                             + constNameTok.m_Text + "'");
+
+                // Validate integral type
+                if (!IsIntegralScalarType(found->m_TypeName))
+                    throw std::runtime_error(m_FilePath + ":" + std::to_string(tokenLine) +
+                                             ": scalar const '" + srInputName + "::" + constNameTok.m_Text
+                                             + "' has type '" + found->m_TypeName
+                                             + "', which cannot be used as an array size;"
+                                             " only integral types (int, uint, int32_t, uint32_t, etc.) are allowed");
+
+                // Parse the value as an integer
+                int n = 0;
+                try { n = std::stoi(found->m_Value); }
+                catch (...)
+                {
+                    throw std::runtime_error(m_FilePath + ":" + std::to_string(tokenLine) +
+                                             ": scalar const '" + srInputName + "::" + constNameTok.m_Text
+                                             + "' value '" + found->m_Value
+                                             + "' cannot be parsed as an integer for use as array size");
+                }
+                if (n < 1)
+                    throw std::runtime_error(m_FilePath + ":" + std::to_string(tokenLine) +
+                                             ": scalar const '" + srInputName + "::" + constNameTok.m_Text
+                                             + "' value " + std::to_string(n)
+                                             + " is not a valid array size (must be >= 1)");
+
+                sizeExpr = srInputName + "::" + constNameTok.m_Text;
+                total = n;
+            }
+            else
+            {
+                // Literal integer dimension
+                if (!sizeExpr.empty())
+                    throw std::runtime_error(m_FilePath + ":" + std::to_string(m_Cur.m_Line) +
+                                             ": cannot add more dimensions after symbolic array size '"
+                                             + sizeExpr + "'");
+                int n = ParseInteger();
+                if (n < 1)
+                    throw std::runtime_error(m_FilePath + ":" + std::to_string(m_Cur.m_Line) +
+                                             ": array size must be >= 1");
+                total *= n;
+            }
+
             Expect(TokKind::RBracket, "]");
         }
         while (TryConsume(TokKind::LBracket));
 
-        return MakeArray(std::move(elemType), total);
+        return MakeArray(std::move(elemType), total, false, sizeExpr);
     }
 
     // -----------------------------------------------------------------------

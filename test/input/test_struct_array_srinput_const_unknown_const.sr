@@ -1,0 +1,12 @@
+// Error test: referencing a const name that does not exist in the srinput.
+// Expected: parse error "srinput 'Config' has no scalar const named 'NoSuchConst'"
+
+srinput Config
+{
+    static const uint MaxLights = 4;
+};
+
+struct BadArray
+{
+    float values[Config::NoSuchConst];
+};

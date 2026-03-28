@@ -1,0 +1,12 @@
+// Error test: double scalar const used as array size.
+// Expected: parse error "has type 'double', which cannot be used as an array size"
+
+srinput Config
+{
+    static const double BigValue = 3.14159265358979;
+};
+
+struct BadArray
+{
+    float values[Config::BigValue];
+};

@@ -1,0 +1,7 @@
+// Error test: referencing an srinput that does not exist in array size.
+// Expected: parse error "unknown srinput 'NonExistent' referenced in array size"
+
+struct BadArray
+{
+    float values[NonExistent::MaxCount];
+};
