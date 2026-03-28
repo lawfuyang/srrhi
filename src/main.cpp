@@ -234,12 +234,13 @@ static void ProcessFile(const fs::path& srFile,
     }
 
     // --- Visualizer ---
-    try
+    if (g_Verbose)
     {
-        std::string vis      = VisualizeLayouts(layouts);
-        std::string visMR    = VisualizeLayoutsMachineReadable(layouts);
-        if (g_Verbose)
+        try
         {
+            std::string vis = VisualizeLayouts(layouts);
+            std::string visMR = VisualizeLayoutsMachineReadable(layouts);
+
             printf("=== %s ===\n", srFile.string().c_str());
             fwrite(vis.c_str(), 1, vis.size(), stdout);
             // Machine-readable section, clearly delimited
@@ -247,15 +248,16 @@ static void ProcessFile(const fs::path& srFile,
             fwrite(visMR.c_str(), 1, visMR.size(), stdout);
             printf("\n");
             fflush(stdout);
+
+            VerboseMsg("  Visualizer: %zu bytes for %s\n",
+                vis.size(), srFile.filename().string().c_str());
         }
-        VerboseMsg("  Visualizer: %zu bytes for %s\n",
-               vis.size(), srFile.filename().string().c_str());
-    }
-    catch (const std::exception& e)
-    {
-        LogMsg("  ERROR (visualizer): %s\n", e.what());
-        throw std::runtime_error(
-            std::string("Visualizer failed for '") + srFile.string() + "': " + e.what());
+        catch (const std::exception& e)
+        {
+            LogMsg("  ERROR (visualizer): %s\n", e.what());
+            throw std::runtime_error(
+                std::string("Visualizer failed for '") + srFile.string() + "': " + e.what());
+        }
     }
 
     // Relative stem: e.g. "sub/example" for use in output paths and guard names
