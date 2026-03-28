@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.16)
 project(srrhi)
 
+# Option to control whether to build validation and test targets
+# Set to OFF when using this project as a submodule to only build the main 'srrhi' target
+option(SRRHI_BUILD_VALIDATION_TARGETS "Build validation and test targets" ON)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -113,60 +117,63 @@ target_link_libraries(${PROJECT_NAME} PRIVATE "${DXC_INSTALL_DIR}/lib/x64/dxcomp
 #   4. Run any validation executable: .\bin\validation_test_arrays.exe, etc.
 # ============================================================================
 
-# Find all validation_*.cpp files from both auto-generated and manual folders
-file(GLOB VALIDATION_SOURCES 
-    "${CMAKE_SOURCE_DIR}/test/output/cpp/validation_*.cpp"
-    "${CMAKE_SOURCE_DIR}/test/manual_validation/validation_*.cpp"
-)
+if(SRRHI_BUILD_VALIDATION_TARGETS)
+    # Find all validation_*.cpp files from both auto-generated and manual folders
+    file(GLOB VALIDATION_SOURCES 
+        "${CMAKE_SOURCE_DIR}/test/output/cpp/validation_*.cpp"
+        "${CMAKE_SOURCE_DIR}/test/manual_validation/validation_*.cpp"
+    )
 
-# Create an executable for each validation file
-foreach(VALIDATION_FILE ${VALIDATION_SOURCES})
-    get_filename_component(FILENAME ${VALIDATION_FILE} NAME)
-    string(REPLACE ".cpp" "" TARGET_NAME ${FILENAME})
-    
-    add_executable(${TARGET_NAME} ${VALIDATION_FILE})
-    
-    target_include_directories(${TARGET_NAME} 
-        PRIVATE "${CMAKE_SOURCE_DIR}/test/output/cpp"
-        PRIVATE "${CMAKE_SOURCE_DIR}/test/manual_validation"
-        PRIVATE "${CMAKE_SOURCE_DIR}"
+    # Create an executable for each validation file
+    foreach(VALIDATION_FILE ${VALIDATION_SOURCES})
+        get_filename_component(FILENAME ${VALIDATION_FILE} NAME)
+        string(REPLACE ".cpp" "" TARGET_NAME ${FILENAME})
+        
+        add_executable(${TARGET_NAME} ${VALIDATION_FILE})
+        
+        target_include_directories(${TARGET_NAME} 
+            PRIVATE "${CMAKE_SOURCE_DIR}/test/output/cpp"
+            PRIVATE "${CMAKE_SOURCE_DIR}/test/manual_validation"
+            PRIVATE "${CMAKE_SOURCE_DIR}"
+            PRIVATE "${DXC_INSTALL_DIR}/inc"
+        )
+        
+        set_target_properties(${TARGET_NAME} PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
+        )
+        
+        message(STATUS "Created validation target: ${TARGET_NAME}")
+    endforeach()
+
+    # ============================================================================
+    # HLSL runtime validation executable
+    # Uses D3D12 (WARP software adapter) + DXC to compile and execute compute
+    # shaders built from generated .hlsli files, then verifies the UAV output
+    # matches expected bit-exact values.
+    #
+    # Usage:
+    #   cd bin
+    #   .\hlsl_runtime_validation.exe
+    # ============================================================================
+
+    add_executable(hlsl_runtime_validation
+        "${CMAKE_SOURCE_DIR}/src/hlsl_runtime_test.cpp"
+    )
+
+    target_include_directories(hlsl_runtime_validation
         PRIVATE "${DXC_INSTALL_DIR}/inc"
     )
-    
-    set_target_properties(${TARGET_NAME} PROPERTIES
+
+    target_link_libraries(hlsl_runtime_validation
+        PRIVATE "${DXC_INSTALL_DIR}/lib/x64/dxcompiler.lib"
+        PRIVATE d3d12
+        PRIVATE dxgi
+    )
+
+    set_target_properties(hlsl_runtime_validation PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
     )
-    
-    message(STATUS "Created validation target: ${TARGET_NAME}")
-endforeach()
 
-# ============================================================================
-# HLSL runtime validation executable
-# Uses D3D12 (WARP software adapter) + DXC to compile and execute compute
-# shaders built from generated .hlsli files, then verifies the UAV output
-# matches expected bit-exact values.
-#
-# Usage:
-#   cd bin
-#   .\hlsl_runtime_validation.exe
-# ============================================================================
+    message(STATUS "Created HLSL runtime validation target: hlsl_runtime_validation")
+endif()
 
-add_executable(hlsl_runtime_validation
-    "${CMAKE_SOURCE_DIR}/src/hlsl_runtime_test.cpp"
-)
-
-target_include_directories(hlsl_runtime_validation
-    PRIVATE "${DXC_INSTALL_DIR}/inc"
-)
-
-target_link_libraries(hlsl_runtime_validation
-    PRIVATE "${DXC_INSTALL_DIR}/lib/x64/dxcompiler.lib"
-    PRIVATE d3d12
-    PRIVATE dxgi
-)
-
-set_target_properties(hlsl_runtime_validation PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}"
-)
-
-message(STATUS "Created HLSL runtime validation target: hlsl_runtime_validation")
