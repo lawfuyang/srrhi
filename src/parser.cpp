@@ -219,6 +219,7 @@ struct Parser
         bool anyBranchTaken;  // at least one branch condition evaluated to true so far
         bool currentlyActive; // current branch is live
         bool inElse;          // have already processed an #else for this frame
+        int  openHashLine = 0;// line of the '#' that opened this block (#if/#ifdef/#ifndef)
     };
     std::vector<CondFrame> m_CondStack;
 
@@ -229,9 +230,43 @@ struct Parser
         return m_CondStack.back().currentlyActive;
     }
 
+    // -----------------------------------------------------------------------
+    // Raw-text capture helpers for preprocessor passthrough.
+    // -----------------------------------------------------------------------
+
+    // Line-start position table: entry [i] = byte offset of line (i+1) in m_Lex.m_Src.
+    std::vector<size_t> m_LineStartPositions;
+
+    // Set by ParseNonStructType() when the type identifier resolved via a macro alias.
+    // Cleared at the start of each ParseNonStructType() call.
+    std::string m_LastResolvedAliasName;
+
+    // Tracks nesting depth inside struct/cbuffer/srinput bodies.
+    // Passthrough blocks are captured only at depth 0 (true file scope).
+    int m_BodyNestingDepth = 0;
+
+    // Returns verbatim source text for lines startLine..endLine (1-based, inclusive),
+    // including the trailing newline of endLine.
+    std::string GetRawLines(int startLine, int endLine) const
+    {
+        if (startLine < 1 || endLine < startLine ||
+            startLine > (int)m_LineStartPositions.size())
+            return "";
+        size_t startPos = m_LineStartPositions[startLine - 1];
+        size_t endPos   = (endLine < (int)m_LineStartPositions.size())
+                        ? m_LineStartPositions[endLine]
+                        : m_Lex.m_Src.size();
+        return m_Lex.m_Src.substr(startPos, endPos - startPos);
+    }
+
     Parser(const std::string& src, ParseResult& r, const std::string& path)
         : m_Lex(src), m_Result(r), m_FilePath(path)
     {
+        // Build line-start position table for raw preprocessor capture.
+        m_LineStartPositions.push_back(0);
+        for (size_t i = 0; i < m_Lex.m_Src.size(); ++i)
+            if (m_Lex.m_Src[i] == '\n')
+                m_LineStartPositions.push_back(i + 1);
         Advance();
     }
 
@@ -531,6 +566,15 @@ struct Parser
                                          ": '#define " + macroName.m_Text +
                                          "': value must be a valid HLSL type name or an integer literal");
             }
+            // Passthrough: capture this #define line verbatim when at file scope
+            // (not inside a struct/cbuffer/srinput body, not inside a conditional block).
+            // Defines inside a conditional are captured as part of the whole block at #endif time.
+            if (m_CondStack.empty() && m_BodyNestingDepth == 0)
+            {
+                std::string rawLine = GetRawLines(hashLine, hashLine);
+                if (!rawLine.empty())
+                    m_Result.m_PreprocPassthrough.push_back(std::move(rawLine));
+            }
             return;
         }
 
@@ -560,7 +604,7 @@ struct Parser
             }
             SkipRestOfLine(hashLine);
             bool curr = parentActive && cond;
-            m_CondStack.push_back({parentActive, curr, curr, false});
+            m_CondStack.push_back({parentActive, curr, curr, false, hashLine});
             return;
         }
 
@@ -576,7 +620,7 @@ struct Parser
             }
             SkipRestOfLine(hashLine);
             bool curr = parentActive && cond;
-            m_CondStack.push_back({parentActive, curr, curr, false});
+            m_CondStack.push_back({parentActive, curr, curr, false, hashLine});
             return;
         }
 
@@ -587,7 +631,7 @@ struct Parser
             bool cond = parentActive ? EvalConditionLine(hashLine)
                                      : (SkipRestOfLine(hashLine), false);
             bool curr = parentActive && cond;
-            m_CondStack.push_back({parentActive, curr, curr, false});
+            m_CondStack.push_back({parentActive, curr, curr, false, hashLine});
             return;
         }
 
@@ -633,6 +677,15 @@ struct Parser
             if (m_CondStack.empty())
                 throw std::runtime_error(m_FilePath + ":" + std::to_string(hashLine) +
                                          ": '#endif' without matching '#if'");
+            // Capture the outermost conditional block verbatim for HLSL passthrough.
+            // Inner (nested) blocks are part of their enclosing block's raw text.
+            if (m_CondStack.size() == 1 && m_BodyNestingDepth == 0)
+            {
+                int openLine = m_CondStack.back().openHashLine;
+                std::string block = GetRawLines(openLine, hashLine);
+                if (!block.empty())
+                    m_Result.m_PreprocPassthrough.push_back(std::move(block));
+            }
             m_CondStack.pop_back();
             SkipRestOfLine(hashLine);
             return;
@@ -776,6 +829,7 @@ struct Parser
     // -----------------------------------------------------------------------
     TypeRef ParseNonStructType()
     {
+        m_LastResolvedAliasName.clear();
         bool bIsRowMajor = false;
         if (m_Cur.m_Kind == TokKind::Ident &&
             (m_Cur.m_Text == "row_major" || m_Cur.m_Text == "column_major"))
@@ -861,6 +915,7 @@ struct Parser
                 throw std::runtime_error(m_FilePath + ":" + std::to_string(nameLine) +
                                          ": row_major/column_major qualifier cannot be applied"
                                          " to type alias '" + name + "'");
+            m_LastResolvedAliasName = name; // remember original name for HLSL output
             return aliasIt->second;
         }
 
@@ -1018,6 +1073,7 @@ struct Parser
         }
 
         TypeRef memberType = ParseNonStructType();
+        std::string memberAliasName = m_LastResolvedAliasName; // non-empty if type was a macro alias
 
         do
         {
@@ -1045,8 +1101,9 @@ struct Parser
             }
 
             MemberVariable mv;
-            mv.m_Type = std::move(fieldType);
-            mv.m_Name = nameTok.m_Text;
+            mv.m_Type             = std::move(fieldType);
+            mv.m_Name             = nameTok.m_Text;
+            mv.m_OriginalTypeName = memberAliasName; // preserve macro name for HLSL output
             
             // Skip explicit padding members (ones named pad*) during parsing
             // The layout engine will auto-generate padding as needed
@@ -1066,6 +1123,7 @@ struct Parser
     std::vector<MemberVariable> ParseStructBody()
     {
         Expect(TokKind::LBrace, "{");
+        ++m_BodyNestingDepth; // entering struct/cbuffer body
         std::vector<MemberVariable> members;
         std::unordered_set<std::string> memberNames;
         while (!Check(TokKind::RBrace) && !Check(TokKind::Eof))
@@ -1096,6 +1154,7 @@ struct Parser
                 }
             }
         }
+        --m_BodyNestingDepth; // leaving struct/cbuffer body
         Expect(TokKind::RBrace, "}");
         return members;
     }
@@ -1345,6 +1404,7 @@ struct Parser
                 }
 
                 Expect(TokKind::LBrace, "{");
+                ++m_BodyNestingDepth; // suppress passthrough capture inside srinput body
 
                 SrInputDef srInputDef;
                 srInputDef.m_Name             = srInputName.m_Text;
@@ -1697,37 +1757,48 @@ struct Parser
                             );
 
                         std::string templateArg;
-                        std::string fullTypeName = typeName.m_Text;
+                        std::string fullTypeName    = typeName.m_Text;
+                        std::string originalTemplateArg; // raw identifier from .sr (may be an external macro)
 
                         if (!bNoTemplateArg && Check(TokKind::LAngle))
                         {
-                            // Parse <templateArg> — may be a builtin type, struct name, or type alias.
+                            // Parse <templateArg> — may be a builtin type, struct name, type alias,
+                            // or an externally-defined macro name (validated by DXC, not by the parser).
                             Advance(); // consume '<'
                             if (m_Cur.m_Kind != TokKind::Ident)
                                 throw std::runtime_error(m_FilePath + ":" + std::to_string(m_Cur.m_Line) +
                                                          ": expected type argument inside '<>'");
                             Token argTok = m_Cur; Advance();
-                            templateArg = argTok.m_Text;
+                            originalTemplateArg = argTok.m_Text; // preserve raw name before alias resolution
+                            templateArg         = argTok.m_Text;
 
                             // Resolve type alias if the token is a known macro / typedef / using.
-                            {
-                                auto aliasIt = m_TypeAliases.find(templateArg);
-                                if (aliasIt != m_TypeAliases.end())
-                                    templateArg = TypeDisplayName(aliasIt->second);
-                            }
+                            auto aliasIt = m_TypeAliases.find(templateArg);
+                            if (aliasIt != m_TypeAliases.end())
+                                templateArg = TypeDisplayName(aliasIt->second);
 
-                            // Validate the resolved type: must be a visible builtin or struct.
+                            // Validate the resolved type: must be a known builtin, a known struct, or
+                            // an unresolved identifier treated as an externally-defined macro.
+                            // Exception: StructuredBuffer/RWStructuredBuffer require a named struct.
                             bool bIsBuiltin = false;
                             for (auto& [key, info] : g_Scalars)
                                 if (templateArg.rfind(key, 0) == 0) { bIsBuiltin = true; break; }
 
-                            if (!bIsBuiltin)
+                            bool bRequiresStruct = (foundKind == ResourceKind::StructuredBuffer ||
+                                                    foundKind == ResourceKind::RWStructuredBuffer);
+
+                            if (!bIsBuiltin && m_StructMap.find(templateArg) == m_StructMap.end())
                             {
-                                if (m_StructMap.find(templateArg) == m_StructMap.end())
+                                if (bRequiresStruct)
+                                {
+                                    // Struct-typed resources must reference a visible struct definition.
                                     throw std::runtime_error(m_FilePath + ":" + std::to_string(argTok.m_Line) +
                                                              ": resource template argument '" + argTok.m_Text +
-                                                             "' (resolved as '" + templateArg +
-                                                             "') is not a visible struct or builtin type");
+                                                             "' is not a defined struct");
+                                }
+                                // Other resource types: treat as externally-defined macro (e.g. SPD_TYPE).
+                                // DXC will validate at compile time.
+                                templateArg = originalTemplateArg;
                             }
 
                             Expect(TokKind::RAngle, ">");
@@ -1754,10 +1825,11 @@ struct Parser
                         }
 
                         ResourceMember rm;
-                        rm.m_Kind        = foundKind;
-                        rm.m_TypeName    = fullTypeName;
-                        rm.m_TemplateArg = templateArg;
-                        rm.m_MemberName  = memberName.m_Text;
+                        rm.m_Kind                = foundKind;
+                        rm.m_TypeName            = fullTypeName;
+                        rm.m_TemplateArg         = templateArg;
+                        rm.m_OriginalTemplateArg = (originalTemplateArg != templateArg) ? originalTemplateArg : "";
+                        rm.m_MemberName          = memberName.m_Text;
                         int rmIdx = static_cast<int>(srInputDef.m_Resources.size());
                         srInputDef.m_Resources.push_back(std::move(rm));
                         srInputDef.m_BodyOrder.push_back({1, rmIdx}); // Resource
@@ -1866,6 +1938,7 @@ struct Parser
                     }
                 }
 
+                --m_BodyNestingDepth;
                 Expect(TokKind::RBrace, "}");
                 Expect(TokKind::Semicolon, ";");
 
@@ -1898,6 +1971,12 @@ struct Parser
                 TypeRef baseType = ParseNonStructType();
                 Token aliasName  = Expect(TokKind::Ident, "alias name after base type in typedef");
                 Expect(TokKind::Semicolon, ";");
+                // Reconstruct a HLSL-compatible typedef line for passthrough (file-scope only).
+                if (m_CondStack.empty())
+                {
+                    std::string hlslLine = "typedef " + TypeDisplayName(baseType) + " " + aliasName.m_Text + ";\n";
+                    m_Result.m_PreprocPassthrough.push_back(std::move(hlslLine));
+                }
                 m_TypeAliases[aliasName.m_Text] = std::move(baseType);
                 continue;
             }
@@ -1913,6 +1992,12 @@ struct Parser
                 Advance(); // consume '='
                 TypeRef baseType = ParseNonStructType();
                 Expect(TokKind::Semicolon, ";");
+                // Reconstruct a HLSL-compatible typedef line for passthrough (file-scope only).
+                if (m_CondStack.empty())
+                {
+                    std::string hlslLine = "typedef " + TypeDisplayName(baseType) + " " + aliasName.m_Text + ";\n";
+                    m_Result.m_PreprocPassthrough.push_back(std::move(hlslLine));
+                }
                 m_TypeAliases[aliasName.m_Text] = std::move(baseType);
                 continue;
             }

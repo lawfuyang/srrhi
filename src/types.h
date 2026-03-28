@@ -62,6 +62,7 @@ struct MemberVariable
 {
     TypeRef     m_Type;
     std::string m_Name;
+    std::string m_OriginalTypeName; // non-empty when the type came from a macro alias (#define / typedef / using)
     bool        m_bIsCBuffer = false;
     bool        m_bIsSBuffer = false;
 };
@@ -154,8 +155,9 @@ inline bool IsUAV(ResourceKind k)
 struct ResourceMember
 {
     ResourceKind m_Kind;
-    std::string  m_TypeName;    // e.g. "Texture2D<float4>" or "ByteAddressBuffer"
-    std::string  m_TemplateArg; // e.g. "float4", "uint", "" for raw buffers
+    std::string  m_TypeName;             // e.g. "Texture2D<float4>" (resolved) or "ByteAddressBuffer"
+    std::string  m_TemplateArg;          // resolved template arg, e.g. "float4"
+    std::string  m_OriginalTemplateArg;  // as written in .sr when it was a macro alias (e.g. "SPD_TYPE")
     std::string  m_MemberName;
 };
 
@@ -277,6 +279,14 @@ struct ParseResult
     enum class DeclKind { Struct, BufferDef, SrInput };
     struct DeclEntry { DeclKind kind; size_t idx; };
     std::vector<DeclEntry>           m_DeclOrder;
+
+    // Verbatim preprocessor blocks from the .sr source, in declaration order.
+    // Each entry is a complete self-contained unit:
+    //   - A single "#define" line (flag, numeric, or type-alias macro)
+    //   - A complete "#if..#endif" block (verbatim raw source text)
+    //   - A reconstructed "typedef T Alias;" line (from typedef or using)
+    // The HLSL generator emits these before the namespace srrhi { block.
+    std::vector<std::string>         m_PreprocPassthrough;
 };
 
 // ---------------------------------------------------------------------------

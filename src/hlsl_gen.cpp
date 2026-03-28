@@ -116,10 +116,10 @@ static void EmitStructBodyHlsl(std::ostringstream& out,
             }
             else
             {
-                // Regular array: emit "elementType name[size];"
-                // If the size came from a scalar const reference, append it as a comment.
-                out << fInd << HlslTypeName(arr.m_ElementType)
-                    << " " << mv.m_Name
+                // Regular array: use original alias name if element type came from a macro alias.
+                std::string elemName = mv.m_OriginalTypeName.empty()
+                    ? HlslTypeName(arr.m_ElementType) : mv.m_OriginalTypeName;
+                out << fInd << elemName << " " << mv.m_Name
                     << "[" << arr.m_ArraySize << "]";
                 if (!arr.m_SizeExpr.empty())
                     out << "; // " << arr.m_SizeExpr << "\n";
@@ -129,7 +129,10 @@ static void EmitStructBodyHlsl(std::ostringstream& out,
         }
         else
         {
-            out << fInd << HlslTypeName(mv.m_Type) << " " << mv.m_Name << ";\n";
+            // Scalar/vector: use original alias name if type came from a macro alias.
+            std::string typeName = mv.m_OriginalTypeName.empty()
+                ? HlslTypeName(mv.m_Type) : mv.m_OriginalTypeName;
+            out << fInd << typeName << " " << mv.m_Name << ";\n";
         }
 
         // Trailing padding after this field
@@ -210,6 +213,19 @@ std::string GenerateHlsl(const ParseResult& pr,
     }
     if (!pr.m_DirectIncludes.empty())
         out << "\n";
+
+    // Emit verbatim preprocessor blocks (#define, #if...#endif, typedef) at file scope
+    // so they are globally visible before the namespace declarations.
+    if (!pr.m_PreprocPassthrough.empty())
+    {
+        for (const auto& block : pr.m_PreprocPassthrough)
+        {
+            out << block;
+            if (!block.empty() && block.back() != '\n')
+                out << "\n";
+        }
+        out << "\n";
+    }
 
     out << "namespace srrhi\n{\n\n";
 
@@ -307,7 +323,15 @@ std::string GenerateHlsl(const ParseResult& pr,
                 const std::string globalVarName = srInputDef.m_Name + "_" + cleanedName;
                 bool bUAV = IsUAV(rm.m_Kind);
                 int rn = bUAV ? uavReg++ : srvReg++;
-                out << rm.m_TypeName << " " << globalVarName
+                // Reconstruct HLSL type name: use original macro name in template arg if applicable.
+                std::string hlslTypeName = rm.m_TypeName;
+                if (!rm.m_OriginalTemplateArg.empty())
+                {
+                    size_t ltPos = hlslTypeName.find('<');
+                    if (ltPos != std::string::npos)
+                        hlslTypeName = hlslTypeName.substr(0, ltPos + 1) + rm.m_OriginalTemplateArg + ">";
+                }
+                out << hlslTypeName << " " << globalVarName
                     << " : register(" << (bUAV ? "u" : "t") << rn;
                 if (srInputDef.m_RegisterSpace >= 0)
                     out << ", space" << srInputDef.m_RegisterSpace;
@@ -349,7 +373,15 @@ std::string GenerateHlsl(const ParseResult& pr,
         {
             const std::string cleanedName = CleanMemberName(rm.m_MemberName);
             const std::string globalVarName = srInputDef.m_Name + "_" + cleanedName;
-            out << "    " << rm.m_TypeName << " Get" << cleanedName
+            // Reconstruct HLSL type name: use original macro name in template arg if applicable.
+            std::string hlslTypeName = rm.m_TypeName;
+            if (!rm.m_OriginalTemplateArg.empty())
+            {
+                size_t ltPos = hlslTypeName.find('<');
+                if (ltPos != std::string::npos)
+                    hlslTypeName = hlslTypeName.substr(0, ltPos + 1) + rm.m_OriginalTemplateArg + ">";
+            }
+            out << "    " << hlslTypeName << " Get" << cleanedName
                 << "() { return " << globalVarName << "; }\n";
         }
 
