@@ -784,6 +784,7 @@ struct Parser
 
                 m_Result.m_Structs.push_back({ nameTok.m_Text, std::move(members) });
                 m_StructMap[nameTok.m_Text] = &m_Result.m_Structs.back();
+                m_Result.m_DeclOrder.push_back({ParseResult::DeclKind::Struct, m_Result.m_Structs.size() - 1});
                 continue;
             }
 
@@ -798,6 +799,7 @@ struct Parser
 
                 StructType st{ nameTok.m_Text, std::move(members) };
                 m_Result.m_BufferDefs.push_back(std::move(st));
+                m_Result.m_DeclOrder.push_back({ParseResult::DeclKind::BufferDef, m_Result.m_BufferDefs.size() - 1});
 
                 MemberVariable mv;
                 mv.m_Type      = &m_Result.m_BufferDefs.back();
@@ -832,6 +834,7 @@ struct Parser
                 MemberVariable innerMv; innerMv.m_Type = it->second; innerMv.m_Name = "";
                 outer.m_Members.push_back(std::move(innerMv));
                 m_Result.m_BufferDefs.push_back(std::move(outer));
+                m_Result.m_DeclOrder.push_back({ParseResult::DeclKind::BufferDef, m_Result.m_BufferDefs.size() - 1});
 
                 MemberVariable mv;
                 mv.m_Type      = &m_Result.m_BufferDefs.back();
@@ -857,6 +860,7 @@ struct Parser
                 MemberVariable innerMv; innerMv.m_Type = std::move(templateType); innerMv.m_Name = "";
                 outer.m_Members.push_back(std::move(innerMv));
                 m_Result.m_BufferDefs.push_back(std::move(outer));
+                m_Result.m_DeclOrder.push_back({ParseResult::DeclKind::BufferDef, m_Result.m_BufferDefs.size() - 1});
 
                 MemberVariable mv;
                 mv.m_Type      = &m_Result.m_BufferDefs.back();
@@ -1459,6 +1463,7 @@ struct Parser
 
                 m_SrInputMap[srInputDef.m_Name] = m_Result.m_SrInputDefs.size();
                 m_Result.m_SrInputDefs.push_back(std::move(srInputDef));
+                m_Result.m_DeclOrder.push_back({ParseResult::DeclKind::SrInput, m_Result.m_SrInputDefs.size() - 1});
                 continue;
             }
 

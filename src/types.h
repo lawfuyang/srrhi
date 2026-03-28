@@ -269,6 +269,14 @@ struct ParseResult
     // Generators use this to skip re-emitting struct definitions already
     // covered by the emitted #include directives.
     std::unordered_set<std::string>  m_IncludedStructNames;
+
+    // Top-level declaration order: tracks the order in which structs, buffer
+    // definitions, and srinput definitions were declared in the *local* .sr file
+    // (not from includes). Generators iterate this to emit definitions in the
+    // same order as they appear in the source.
+    enum class DeclKind { Struct, BufferDef, SrInput };
+    struct DeclEntry { DeclKind kind; size_t idx; };
+    std::vector<DeclEntry>           m_DeclOrder;
 };
 
 // ---------------------------------------------------------------------------

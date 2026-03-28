@@ -664,15 +664,8 @@ std::string GenerateCpp(const ParseResult& pr,
     out << "\n";
     out << "namespace srrhi\n{\n\n";
 
-    // Named struct definitions (remain as plain structs) — skip those from includes.
-    for (const auto& st : pr.m_Structs)
-    {
-        if (pr.m_IncludedStructNames.count(st.m_Name)) continue;
-        int localPadCount = 0;
-        EmitStructCpp(out, st, localPadCount);
-    }
-
-    // Build a set of cbuffer names that are in srinput scopes (including transitive composition)
+    // Build a set of cbuffer names that are in srinput scopes (including transitive composition).
+    // Used to filter BufferDef entries that have no srinput reference.
     std::unordered_set<std::string> cbuffersInSrInput;
     for (const auto& srInputDef : pr.m_SrInputDefs)
     {
@@ -681,35 +674,43 @@ std::string GenerateCpp(const ParseResult& pr,
             cbuffersInSrInput.insert(member.m_CBufferName);
     }
 
-    // Emit cbuffer structs as classes with private members + public setters
-    // (only for those referenced in srinput scopes)
-    for (const auto& bufDef : pr.m_BufferDefs)
+    // Emit definitions in the same order they were declared in the .sr file.
+    for (const auto& decl : pr.m_DeclOrder)
     {
-        if (cbuffersInSrInput.count(bufDef.m_Name))
+        if (decl.kind == ParseResult::DeclKind::Struct)
         {
-            const LayoutMember* bufLayout = nullptr;
-            for (const auto& lm : layouts)
+            const auto& st = pr.m_Structs[decl.idx];
+            if (pr.m_IncludedStructNames.count(st.m_Name)) continue;
+            int localPadCount = 0;
+            EmitStructCpp(out, st, localPadCount);
+            continue;
+        }
+
+        if (decl.kind == ParseResult::DeclKind::BufferDef)
+        {
+            const auto& bufDef = pr.m_BufferDefs[decl.idx];
+            if (cbuffersInSrInput.count(bufDef.m_Name))
             {
-                if (lm.m_Name == bufDef.m_Name)
+                const LayoutMember* bufLayout = nullptr;
+                for (const auto& lm : layouts)
                 {
-                    bufLayout = &lm;
-                    break;
+                    if (lm.m_Name == bufDef.m_Name) { bufLayout = &lm; break; }
+                }
+                if (bufLayout)
+                {
+                    int localPadCount = 0;
+                    EmitClassCpp(out, bufDef, *bufLayout, localPadCount, bEmitValidation);
                 }
             }
-
-            if (bufLayout)
-            {
-                int localPadCount = 0;
-                EmitClassCpp(out, bufDef, *bufLayout, localPadCount, bEmitValidation);
-            }
+            continue;
         }
-    }
 
-    // Emit per-srinput classes with NumCBuffers/NumSRVs/NumUAVs/NumSamplers + per-resource register index constants.
-    // CBuffer, SRV, UAV, and sampler register numbers are all local to each srinput scope (reset per scope).
-    // Composition: the flattened view is used so nested srinput resources are inlined with unique register indices.
-    for (const auto& srInputDef : pr.m_SrInputDefs)
-    {
+        // DeclKind::SrInput — emit per-srinput class with NumCBuffers/NumSRVs/NumUAVs/NumSamplers
+        // + per-resource register index constants.
+        // CBuffer, SRV, UAV, and sampler register numbers are all local to each srinput scope (reset per scope).
+        // Composition: the flattened view is used so nested srinput resources are inlined with unique register indices.
+        {
+        const auto& srInputDef = pr.m_SrInputDefs[decl.idx];
         FlatSrInput flat = FlattenSrInput(srInputDef, pr.m_SrInputDefs);
 
         // Count SRVs and UAVs for this (flattened) srinput scope
@@ -1097,7 +1098,8 @@ std::string GenerateCpp(const ParseResult& pr,
                 << std::max(0, srInputDef.m_RegisterSpace) << "u);\n";
             out << "\n";
         }
-    }
+        }  // SrInput case
+    }  // for (decl : m_DeclOrder)
 
     out << "\n}  // namespace srrhi\n";
 

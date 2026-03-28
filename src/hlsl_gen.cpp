@@ -215,14 +215,9 @@ std::string GenerateHlsl(const ParseResult& pr,
 
     // Emit named struct definitions — skip those that came from included files.
     VerboseMsg("[hlsl_gen]   Emitting %zu struct(s)...\n", pr.m_Structs.size());
-    for (const auto& st : pr.m_Structs)
-    {
-        if (pr.m_IncludedStructNames.count(st.m_Name)) continue;
-        int localPadCount = 0;
-        EmitStructHlsl(out, st, localPadCount, 0, nullptr);
-    }
 
-    // Build a set of cbuffer names that are in srinput scopes (including transitive nested srinputs)
+    // Build a set of cbuffer names that are in srinput scopes (including transitive nested srinputs).
+    // Used to filter BufferDef entries that have no srinput reference.
     std::unordered_set<std::string> cbuffersInSrInput;
     for (const auto& srInputDef : pr.m_SrInputDefs)
     {
@@ -231,38 +226,49 @@ std::string GenerateHlsl(const ParseResult& pr,
             cbuffersInSrInput.insert(member.m_CBufferName);
     }
 
-    // Emit cbuffer definitions as structs (only for those in srinput scopes)
-    VerboseMsg("[hlsl_gen]   Emitting %zu cbuffer definition(s) as struct(s)...\n",
-               cbuffersInSrInput.size());
-    for (const auto& bufDef : pr.m_BufferDefs)
+    // Emit definitions in the same order they were declared in the .sr file.
+    for (const auto& decl : pr.m_DeclOrder)
     {
-        if (cbuffersInSrInput.count(bufDef.m_Name))
+        if (decl.kind == ParseResult::DeclKind::Struct)
         {
-            const LayoutMember* bufLayout = nullptr;
-            for (const auto& lm : layouts)
-            {
-                if (lm.m_Name == bufDef.m_Name) { bufLayout = &lm; break; }
-            }
+            const auto& st = pr.m_Structs[decl.idx];
+            if (pr.m_IncludedStructNames.count(st.m_Name)) continue;
             int localPadCount = 0;
-            EmitStructHlsl(out, bufDef, localPadCount, 0, bufLayout);
+            EmitStructHlsl(out, st, localPadCount, 0, nullptr);
+            continue;
         }
-    }
 
-    // Emit cbuffers that are in srinput scopes.
-    // Register numbers are local to each srinput scope (reset per srinput).
-    // Composition: flatten the srinput hierarchy so registers are assigned uniquely.
-    // Space is always taken from the top-level parent srinput.
-    VerboseMsg("[hlsl_gen]   Emitting cbuffers with register bindings...\n");
-    for (const auto& srInputDef : pr.m_SrInputDefs)
-    {
+        if (decl.kind == ParseResult::DeclKind::BufferDef)
+        {
+            const auto& bufDef = pr.m_BufferDefs[decl.idx];
+            if (cbuffersInSrInput.count(bufDef.m_Name))
+            {
+                const LayoutMember* bufLayout = nullptr;
+                for (const auto& lm : layouts)
+                {
+                    if (lm.m_Name == bufDef.m_Name) { bufLayout = &lm; break; }
+                }
+                int localPadCount = 0;
+                EmitStructHlsl(out, bufDef, localPadCount, 0, bufLayout);
+            }
+            continue;
+        }
+
+        // DeclKind::SrInput — emit cbuffer declarations, resource/sampler globals, namespace.
+        // Register numbers are local to each srinput scope (reset per srinput).
+        // Composition: flatten the srinput hierarchy so registers are assigned uniquely.
+        // Space is always taken from the top-level parent srinput.
+        {
+        const auto& srInputDef = pr.m_SrInputDefs[decl.idx];
         FlatSrInput flat = FlattenSrInput(srInputDef, pr.m_SrInputDefs);
-        int regNum = 0;  // b# counter: local to this srinput scope, resets per srinput
+
+        // Cbuffer declarations (cbuffer X : register(bN))
+        int regNum = 0;
         for (const auto& member : flat.m_Members)
         {
             const std::string cleanedMemberName = CleanMemberName(member.m_MemberName);
             const std::string varName = srInputDef.m_Name + "_" + cleanedMemberName;
 
-            // Find the cbuffer definition
             StructType* bufDef = nullptr;
             for (const auto& bd : pr.m_BufferDefs)
             {
@@ -278,81 +284,59 @@ std::string GenerateHlsl(const ParseResult& pr,
                 const LayoutMember* correspondingLayout = nullptr;
                 for (const auto& lm : layouts)
                 {
-                    if (lm.m_Name == member.m_CBufferName)
-                    {
-                        correspondingLayout = &lm;
-                        break;
-                    }
+                    if (lm.m_Name == member.m_CBufferName) { correspondingLayout = &lm; break; }
                 }
 
                 if (correspondingLayout)
                 {
                     int localPadCount = 0;
-                    // Space is always from the top-level parent srinput (not the nested one)
                     EmitWrappedCBufferHlsl(out, *bufDef, *correspondingLayout,
                                           regNum, varName, srInputDef.m_RegisterSpace, localPadCount);
                 }
             }
-
-            // Always advance — push constants occupy b0 and advance to b1, etc.
             ++regNum;
         }
-    }
 
-    // Emit per-srinput resource declarations (SRV/UAV globals with register bindings).
-    // SRV and UAV register counters are local to each srinput scope (reset per scope).
-    // Composition: use flattened view; space is always from the top-level parent.
-    VerboseMsg("[hlsl_gen]   Emitting resource declarations...\n");
-    for (const auto& srInputDef : pr.m_SrInputDefs)
-    {
-        FlatSrInput flat = FlattenSrInput(srInputDef, pr.m_SrInputDefs);
-        int srvReg = 0;
-        int uavReg = 0;
-        for (const auto& rm : flat.m_Resources)
+        // Resource declarations (SRV/UAV globals)
         {
-            const std::string cleanedName = CleanMemberName(rm.m_MemberName);
-            const std::string globalVarName = srInputDef.m_Name + "_" + cleanedName;
-            bool bUAV = IsUAV(rm.m_Kind);
-            int regNum = bUAV ? uavReg++ : srvReg++;
-            out << rm.m_TypeName << " " << globalVarName
-                << " : register(" << (bUAV ? "u" : "t") << regNum;
-            if (srInputDef.m_RegisterSpace >= 0)
-                out << ", space" << srInputDef.m_RegisterSpace;
-            out << ");\n";
+            int srvReg = 0;
+            int uavReg = 0;
+            for (const auto& rm : flat.m_Resources)
+            {
+                const std::string cleanedName = CleanMemberName(rm.m_MemberName);
+                const std::string globalVarName = srInputDef.m_Name + "_" + cleanedName;
+                bool bUAV = IsUAV(rm.m_Kind);
+                int rn = bUAV ? uavReg++ : srvReg++;
+                out << rm.m_TypeName << " " << globalVarName
+                    << " : register(" << (bUAV ? "u" : "t") << rn;
+                if (srInputDef.m_RegisterSpace >= 0)
+                    out << ", space" << srInputDef.m_RegisterSpace;
+                out << ");\n";
+            }
+            if (!flat.m_Resources.empty())
+                out << "\n";
         }
-        if (!flat.m_Resources.empty())
-            out << "\n";
-    }
 
-    // Emit per-srinput sampler declarations (s# registers, local per scope).
-    VerboseMsg("[hlsl_gen]   Emitting sampler declarations...\n");
-    for (const auto& srInputDef : pr.m_SrInputDefs)
-    {
-        FlatSrInput flat = FlattenSrInput(srInputDef, pr.m_SrInputDefs);
-        int samplerReg = 0;
-        for (const auto& sm : flat.m_Samplers)
+        // Sampler declarations (s# registers)
         {
-            const std::string cleanedName = CleanMemberName(sm.m_MemberName);
-            const std::string globalVarName = srInputDef.m_Name + "_" + cleanedName;
-            out << sm.m_TypeName << " " << globalVarName
-                << " : register(s" << samplerReg++;
-            if (srInputDef.m_RegisterSpace >= 0)
-                out << ", space" << srInputDef.m_RegisterSpace;
-            out << ");\n";
+            int samplerReg = 0;
+            for (const auto& sm : flat.m_Samplers)
+            {
+                const std::string cleanedName = CleanMemberName(sm.m_MemberName);
+                const std::string globalVarName = srInputDef.m_Name + "_" + cleanedName;
+                out << sm.m_TypeName << " " << globalVarName
+                    << " : register(s" << samplerReg++;
+                if (srInputDef.m_RegisterSpace >= 0)
+                    out << ", space" << srInputDef.m_RegisterSpace;
+                out << ");\n";
+            }
+            if (!flat.m_Samplers.empty())
+                out << "\n";
         }
-        if (!flat.m_Samplers.empty())
-            out << "\n";
-    }
 
-    // Emit per-srinput namespaces with getter functions.
-    // For composed srinputs, flattened members/resources/samplers/consts all land
-    // in the top-level parent's namespace under the parent's global variable names.
-    for (const auto& srInputDef : pr.m_SrInputDefs)
-    {
-        FlatSrInput flat = FlattenSrInput(srInputDef, pr.m_SrInputDefs);
+        // Namespace with getter functions and scalar constants
         out << "namespace " << srInputDef.m_Name << "\n{\n";
 
-        // Cbuffer getters
         for (const auto& member : flat.m_Members)
         {
             const std::string cleanedName = CleanMemberName(member.m_MemberName);
@@ -361,7 +345,6 @@ std::string GenerateHlsl(const ParseResult& pr,
                 << "() { return " << varName << "; }\n";
         }
 
-        // Resource getter functions
         for (const auto& rm : flat.m_Resources)
         {
             const std::string cleanedName = CleanMemberName(rm.m_MemberName);
@@ -370,7 +353,6 @@ std::string GenerateHlsl(const ParseResult& pr,
                 << "() { return " << globalVarName << "; }\n";
         }
 
-        // Sampler getter functions
         for (const auto& sm : flat.m_Samplers)
         {
             const std::string cleanedName = CleanMemberName(sm.m_MemberName);
@@ -379,10 +361,8 @@ std::string GenerateHlsl(const ParseResult& pr,
                 << "() { return " << globalVarName << "; }\n";
         }
 
-        // Scalar constants as static const declarations
         for (const auto& sc : flat.m_ScalarConsts)
         {
-            // Map C-style type aliases to canonical HLSL type names
             std::string hlslType = sc.m_TypeName;
             if (hlslType == "int32_t")        hlslType = "int";
             else if (hlslType == "uint32_t")  hlslType = "uint";
@@ -393,7 +373,8 @@ std::string GenerateHlsl(const ParseResult& pr,
         }
 
         out << "}\n\n";
-    }
+        }  // SrInput case
+    }  // for (decl : m_DeclOrder)
 
     out << "\n}  // namespace srrhi\n";
 
