@@ -2,6 +2,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <stdexcept>
 
 #include "types.h"
@@ -131,6 +132,65 @@ static std::string MakeHlslGuard(const fs::path& stem)
 }
 
 // ---------------------------------------------------------------------------
+// Resolve include path relative to base file
+// ---------------------------------------------------------------------------
+static std::string ResolveIncludePath(const std::string& baseFile,
+                                      const std::string& includeFile)
+{
+    fs::path baseDirPath = fs::path(baseFile).parent_path();
+    return fs::absolute(baseDirPath / includeFile).string();
+}
+
+// ---------------------------------------------------------------------------
+// Recursively collect all files in the .sr file include hierarchy
+// ---------------------------------------------------------------------------
+static void CollectIncludedFiles(const std::string& srFilePath,
+                                 std::unordered_set<std::string>& visited,
+                                 std::vector<std::string>& allFiles)
+{
+    // Avoid infinite loops from circular includes
+    if (visited.count(srFilePath))
+        return;
+    visited.insert(srFilePath);
+    allFiles.push_back(srFilePath);
+
+    // Try to read the file and extract #include directives
+    std::ifstream f(srFilePath);
+    if (!f.is_open())
+        return; // If we can't read, just skip
+
+    std::string line;
+    while (std::getline(f, line))
+    {
+        // Look for #include directives
+        // Pattern: #include "filename"
+        size_t hashPos = line.find('#');
+        if (hashPos == std::string::npos)
+            continue;
+
+        size_t includePos = line.find("include", hashPos);
+        if (includePos == std::string::npos)
+            continue;
+
+        size_t quotePos = line.find('"', includePos);
+        if (quotePos == std::string::npos)
+            continue;
+
+        size_t endQuotePos = line.find('"', quotePos + 1);
+        if (endQuotePos == std::string::npos)
+            continue;
+
+        std::string includeFile = line.substr(quotePos + 1, endQuotePos - quotePos - 1);
+
+        // Resolve the path (relative to the current file's directory)
+        std::string resolvedPath = ResolveIncludePath(srFilePath, includeFile);
+
+        // Recursively collect
+        CollectIncludedFiles(resolvedPath, visited, allFiles);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Process one .sr file — throws on any unrecoverable error
 // ---------------------------------------------------------------------------
 static void ProcessFile(const fs::path& srFile,
@@ -202,20 +262,33 @@ static void ProcessFile(const fs::path& srFile,
     fs::path relPath = fs::relative(srFile, inputRoot);
     fs::path stem    = relPath.parent_path() / srFile.stem();
 
+    // Collect all files in the include hierarchy
+    std::unordered_set<std::string> visited;
+    std::vector<std::string> allIncludedFiles;
+    CollectIncludedFiles(srFile.string(), visited, allIncludedFiles);
+
     // Returns true if outPath needs to be (re)written:
-    // either it doesn't exist yet, or its timestamp is older than the source .sr file,
+    // either it doesn't exist yet, or its timestamp is older than the source .sr file or any included file,
     // or if the current executable is newer than outPath.
     auto NeedsWrite = [&](const fs::path& outPath) -> bool
     {
         if (bEmitValidation) return true; // In validation generation mode, always write stubs
         if (!fs::exists(outPath)) return true;
         
-        // Check if outPath is older than the source .sr file
-        if (fs::last_write_time(outPath) < fs::last_write_time(srFile))
-            return true;
+        auto outTime = fs::last_write_time(outPath);
+
+        // Check if outPath is older than any file in the include hierarchy
+        for (const auto& includedFile : allIncludedFiles)
+        {
+            if (fs::exists(includedFile))
+            {
+                if (outTime < fs::last_write_time(includedFile))
+                    return true;
+            }
+        }
         
         // Check if the current executable is newer than outPath
-        if (fs::last_write_time(outPath) < fs::last_write_time(exePath))
+        if (outTime < fs::last_write_time(exePath))
             return true;
 
         return false;
