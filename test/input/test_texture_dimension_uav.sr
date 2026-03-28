@@ -1,0 +1,12 @@
+// Tests TextureDimension enum values for all UAV texture resource kinds.
+// RW texture variants should map to the same TextureDimension value as their
+// SRV counterparts (e.g. RWTexture2D -> TextureDimension::Texture2D).
+
+srinput AllUavTextureDimensions
+{
+    RWTexture1D<float4>              m_RwTex1D;
+    RWTexture1DArray<float4>         m_RwTex1DArray;
+    RWTexture2D<float4>              m_RwTex2D;
+    RWTexture2DArray<float4>         m_RwTex2DArray;
+    RWTexture3D<float4>              m_RwTex3D;
+};

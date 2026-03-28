@@ -29,6 +29,30 @@ namespace srrhi
 {
 
 // =============================================================================
+// TextureDimension
+//
+// Compile-time classification of the dimensionality of a texture resource.
+//
+// Stored as a const field in ResourceEntry for every resource slot. For
+// non-texture resources (buffers, cbuffers, samplers, RTAS) the value is None.
+// Both SRV and UAV texture variants map to the same TextureDimension value
+// (e.g. Texture2D<float4> and RWTexture2D<float4> both yield Texture2D).
+// =============================================================================
+enum class TextureDimension : uint32_t
+{
+    None,             ///< Not a texture resource (buffer, cbuffer, sampler, RTAS)
+    Texture1D,        ///< Texture1D / RWTexture1D
+    Texture1DArray,   ///< Texture1DArray / RWTexture1DArray
+    Texture2D,        ///< Texture2D / RWTexture2D
+    Texture2DArray,   ///< Texture2DArray / RWTexture2DArray
+    TextureCube,      ///< TextureCube (no RW variant)
+    TextureCubeArray, ///< TextureCubeArray (no RW variant)
+    Texture2DMS,      ///< Texture2DMS (no RW variant)
+    Texture2DMSArray, ///< Texture2DMSArray (no RW variant)
+    Texture3D,        ///< Texture3D / RWTexture3D
+};
+
+// =============================================================================
 // ResourceType
 //
 // Compile-time classification of a bindable GPU resource.
@@ -91,6 +115,10 @@ enum class ResourceType : uint32_t
 //   type           — Compile-time ResourceType classification, derived from the
 //                    HLSL resource variable type declared in the .sr source file.
 //
+//   textureDimension — Compile-time TextureDimension classification. Set to the
+//                    appropriate TextureDimension value for texture resources
+//                    (Texture_SRV and Texture_UAV), or None for all other types.
+//
 //   baseMipLevel   — First mip level to bind. Relevant for texture types only.
 //                    Default: 0.
 //
@@ -110,9 +138,10 @@ enum class ResourceType : uint32_t
 struct ResourceEntry
 {
     void*              pResource      = nullptr; ///< Runtime resource pointer (set via Set*() helpers).
-    const uint32_t     slot;                     ///< Compile-time register slot index (t#/u#/b#/s#).
-    const ResourceType type;                     ///< Compile-time resource type classification.
-    int32_t            baseMipLevel   =  0;      ///< Base mip level  (textures only; default 0).
+    const uint32_t        slot;                     ///< Compile-time register slot index (t#/u#/b#/s#).
+    const ResourceType    type;                     ///< Compile-time resource type classification.
+    const TextureDimension textureDimension;        ///< Compile-time texture dimensionality (None for non-textures).
+    int32_t               baseMipLevel   =  0;      ///< Base mip level  (textures only; default 0).
     int32_t            numMipLevels   = -1;      ///< Mip level count (textures only; -1 = all mips).
     int32_t            baseArraySlice =  0;      ///< Base array slice (array textures only; default 0).
     int32_t            numArraySlices = -1;      ///< Array slice count (array textures only; -1 = all slices).

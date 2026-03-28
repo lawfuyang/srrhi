@@ -113,8 +113,11 @@ target_link_libraries(${PROJECT_NAME} PRIVATE "${DXC_INSTALL_DIR}/lib/x64/dxcomp
 #   4. Run any validation executable: .\bin\validation_test_arrays.exe, etc.
 # ============================================================================
 
-# Find all validation_*.cpp files
-file(GLOB VALIDATION_SOURCES "${CMAKE_SOURCE_DIR}/test/output/cpp/validation_*.cpp")
+# Find all validation_*.cpp files from both auto-generated and manual folders
+file(GLOB VALIDATION_SOURCES 
+    "${CMAKE_SOURCE_DIR}/test/output/cpp/validation_*.cpp"
+    "${CMAKE_SOURCE_DIR}/test/manual_validation/validation_*.cpp"
+)
 
 # Create an executable for each validation file
 foreach(VALIDATION_FILE ${VALIDATION_SOURCES})
@@ -125,6 +128,7 @@ foreach(VALIDATION_FILE ${VALIDATION_SOURCES})
     
     target_include_directories(${TARGET_NAME} 
         PRIVATE "${CMAKE_SOURCE_DIR}/test/output/cpp"
+        PRIVATE "${CMAKE_SOURCE_DIR}/test/manual_validation"
         PRIVATE "${CMAKE_SOURCE_DIR}"
         PRIVATE "${DXC_INSTALL_DIR}/inc"
     )

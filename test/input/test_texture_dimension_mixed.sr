@@ -1,0 +1,32 @@
+// Tests TextureDimension values in a mixed srinput containing both texture and
+// non-texture resources. Verifies ordering and correct dimension assignment
+// when textures are interleaved with other resource types.
+
+cbuffer SceneData
+{
+    float4x4 viewProj;
+    float    time;
+};
+
+srinput MixedTextureDimensions
+{
+    // CBuffer -> TextureDimension::None
+    SceneData                        m_Scene;
+
+    // Texture SRVs -> specific TextureDimension
+    Texture2D<float4>                m_Albedo;
+    Texture2DArray<float4>           m_ShadowMaps;
+    TextureCube<float4>              m_EnvMap;
+
+    // Non-texture SRV -> TextureDimension::None
+    StructuredBuffer<uint>           m_DrawArgs;
+
+    // Texture UAV -> specific TextureDimension
+    RWTexture2D<float4>              m_Output;
+
+    // Non-texture UAV -> TextureDimension::None
+    RWStructuredBuffer<uint>         m_Counter;
+
+    // Sampler -> TextureDimension::None
+    SamplerState                     m_LinearSampler;
+};

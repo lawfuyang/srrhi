@@ -39,6 +39,32 @@ static std::string ResourceKindToSrrResourceType(ResourceKind kind)
     return "srrhi::ResourceType::TypedBuffer_SRV";  // unreachable fallback
 }
 
+// ---------------------------------------------------------------------------
+// Map a ResourceKind to the corresponding srrhi::TextureDimension enum string.
+// Non-texture kinds (buffers, cbuffers, samplers) map to TextureDimension::None.
+// ---------------------------------------------------------------------------
+static std::string ResourceKindToTextureDimension(ResourceKind kind)
+{
+    switch (kind)
+    {
+        case ResourceKind::Texture1D:
+        case ResourceKind::RWTexture1D:              return "srrhi::TextureDimension::Texture1D";
+        case ResourceKind::Texture1DArray:
+        case ResourceKind::RWTexture1DArray:         return "srrhi::TextureDimension::Texture1DArray";
+        case ResourceKind::Texture2D:
+        case ResourceKind::RWTexture2D:              return "srrhi::TextureDimension::Texture2D";
+        case ResourceKind::Texture2DArray:
+        case ResourceKind::RWTexture2DArray:         return "srrhi::TextureDimension::Texture2DArray";
+        case ResourceKind::TextureCube:              return "srrhi::TextureDimension::TextureCube";
+        case ResourceKind::TextureCubeArray:         return "srrhi::TextureDimension::TextureCubeArray";
+        case ResourceKind::Texture2DMS:              return "srrhi::TextureDimension::Texture2DMS";
+        case ResourceKind::Texture2DMSArray:         return "srrhi::TextureDimension::Texture2DMSArray";
+        case ResourceKind::Texture3D:
+        case ResourceKind::RWTexture3D:              return "srrhi::TextureDimension::Texture3D";
+        default:                                     return "srrhi::TextureDimension::None";
+    }
+}
+
 // Returns true if the ResourceKind is a texture type (SRV or UAV).
 static bool IsTextureKind(ResourceKind kind)
 {
@@ -830,7 +856,7 @@ std::string GenerateCpp(const ParseResult& pr,
                         ? "srrhi::ResourceType::PushConstants"
                         : "srrhi::ResourceType::ConstantBuffer";
                     out << "        { nullptr, " << constName
-                        << ", " << resType << " },\n";
+                        << ", " << resType << ", srrhi::TextureDimension::None },\n";
                 }
             }
 
@@ -843,7 +869,8 @@ std::string GenerateCpp(const ParseResult& pr,
                     if (firstSrv) { out << "        // SRVs (t# registers)\n"; firstSrv = false; }
                     const std::string constName = CleanMemberName(rm.m_MemberName) + "RegisterIndex";
                     out << "        { nullptr, " << constName
-                        << ", " << ResourceKindToSrrResourceType(rm.m_Kind) << " },\n";
+                        << ", " << ResourceKindToSrrResourceType(rm.m_Kind)
+                        << ", " << ResourceKindToTextureDimension(rm.m_Kind) << " },\n";
                 }
             }
 
@@ -856,7 +883,8 @@ std::string GenerateCpp(const ParseResult& pr,
                     if (firstUav) { out << "        // UAVs (u# registers)\n"; firstUav = false; }
                     const std::string constName = CleanMemberName(rm.m_MemberName) + "RegisterIndex";
                     out << "        { nullptr, " << constName
-                        << ", " << ResourceKindToSrrResourceType(rm.m_Kind) << " },\n";
+                        << ", " << ResourceKindToSrrResourceType(rm.m_Kind)
+                        << ", " << ResourceKindToTextureDimension(rm.m_Kind) << " },\n";
                 }
             }
 
@@ -868,7 +896,7 @@ std::string GenerateCpp(const ParseResult& pr,
                 {
                     const std::string constName = CleanMemberName(sm.m_MemberName) + "RegisterIndex";
                     out << "        { nullptr, " << constName
-                        << ", srrhi::ResourceType::Sampler },\n";
+                        << ", srrhi::ResourceType::Sampler, srrhi::TextureDimension::None },\n";
                 }
             }
 

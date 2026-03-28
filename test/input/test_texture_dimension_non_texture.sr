@@ -1,0 +1,28 @@
+// Tests that non-texture resource kinds produce TextureDimension::None.
+// Covers: typed buffers, structured buffers, raw buffers, RTAS,
+// constant buffers, and samplers.
+
+cbuffer FrameConsts
+{
+    float4x4 viewProj;
+};
+
+srinput NonTextureResources
+{
+    // CBuffer (b0) -> TextureDimension::None
+    FrameConsts                      m_Frame;
+
+    // Non-texture SRVs -> TextureDimension::None
+    Buffer<float4>                   m_TypedBuf;
+    StructuredBuffer<uint>           m_StructBuf;
+    ByteAddressBuffer                m_RawBuf;
+    RaytracingAccelerationStructure  m_AccelStruct;
+
+    // Non-texture UAVs -> TextureDimension::None
+    RWBuffer<float4>                 m_RwTypedBuf;
+    RWStructuredBuffer<uint>         m_RwStructBuf;
+    RWByteAddressBuffer              m_RwRawBuf;
+
+    // Sampler -> TextureDimension::None
+    SamplerState                     m_Sampler;
+};

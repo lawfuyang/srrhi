@@ -1,0 +1,16 @@
+// Tests TextureDimension enum values for all SRV texture resource kinds.
+// Each resource should produce the corresponding TextureDimension value in
+// the generated ResourceEntry m_Resources[] array.
+
+srinput AllSrvTextureDimensions
+{
+    Texture1D<float4>                m_Tex1D;
+    Texture1DArray<float4>           m_Tex1DArray;
+    Texture2D<float4>                m_Tex2D;
+    Texture2DArray<float4>           m_Tex2DArray;
+    TextureCube<float4>              m_TexCube;
+    TextureCubeArray<float4>         m_TexCubeArray;
+    Texture2DMS<float4>              m_Tex2DMS;
+    Texture2DMSArray<float4>         m_Tex2DMSArray;
+    Texture3D<float4>                m_Tex3D;
+};
