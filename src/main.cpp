@@ -209,7 +209,7 @@ static void ProcessFile(const fs::path& srFile,
         pr = ParseFile(srFile.string());
         long cbufferCount = 0;
         for (auto& b : pr.m_Buffers) if (b.m_bIsCBuffer) ++cbufferCount;
-        LogMsg("  Parse OK: %ld cbuffer(s), %zu struct(s)\n",
+        VerboseMsg("  Parse OK: %ld cbuffer(s), %zu struct(s)\n",
                cbufferCount, pr.m_Structs.size());
     }
     catch (const std::exception& e)
@@ -224,7 +224,7 @@ static void ProcessFile(const fs::path& srFile,
     try
     {
         layouts = ComputeLayouts(pr);
-        LogMsg("  Layout OK: %zu layout(s) computed\n", layouts.size());
+        VerboseMsg("  Layout OK: %zu layout(s) computed\n", layouts.size());
     }
     catch (const std::exception& e)
     {
@@ -248,7 +248,7 @@ static void ProcessFile(const fs::path& srFile,
             printf("\n");
             fflush(stdout);
         }
-        LogMsg("  Visualizer: %zu bytes for %s\n",
+        VerboseMsg("  Visualizer: %zu bytes for %s\n",
                vis.size(), srFile.filename().string().c_str());
     }
     catch (const std::exception& e)

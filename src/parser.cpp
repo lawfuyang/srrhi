@@ -1413,7 +1413,7 @@ void LayoutMember::PushSubmember(LayoutMember m)
 // ---------------------------------------------------------------------------
 static ParseResult ParseFileInternal(const std::string& path)
 {
-    LogMsg("[parser] Opening: %s\n", path.c_str());
+    VerboseMsg("[parser] Opening: %s\n", path.c_str());
 
     std::ifstream f(path);
     if (!f.is_open())
@@ -1428,7 +1428,7 @@ static ParseResult ParseFileInternal(const std::string& path)
     Parser p(ss.str(), result, path);
     p.Parse();
 
-    LogMsg("[parser] Done: %zu structs, %zu buffers, %zu srinput(s)\n",
+    VerboseMsg("[parser] Done: %zu structs, %zu buffers, %zu srinput(s)\n",
            result.m_Structs.size(), result.m_Buffers.size(), result.m_SrInputDefs.size());
     return result;
 }
