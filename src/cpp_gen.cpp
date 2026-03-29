@@ -234,16 +234,58 @@ static bool StructLayoutHasPadding(const LayoutMember& lm)
     return false;
 }
 
+// ---------------------------------------------------------------------------
+// Returns true when a type (possibly nested through arrays/structs) contains
+// any ExternType. Extern type sizes are not known at generation time, so they
+// make offsets of following cbuffer members unknown for static_assert checks.
+// ---------------------------------------------------------------------------
+static bool TypeContainsExternImpl(const TypeRef& type,
+                                   std::unordered_set<const StructType*>& visiting)
+{
+    if (std::holds_alternative<ExternType>(type))
+        return true;
+
+    if (auto* ap = std::get_if<std::shared_ptr<ArrayNode>>(&type))
+        return TypeContainsExternImpl((*ap)->m_ElementType, visiting);
+
+    if (auto* sp = std::get_if<StructType*>(&type))
+    {
+        const StructType* st = *sp;
+        if (!st || visiting.count(st) > 0)
+            return false;
+
+        visiting.insert(st);
+        for (const auto& mv : st->m_Members)
+        {
+            if (TypeContainsExternImpl(mv.m_Type, visiting))
+            {
+                visiting.erase(st);
+                return true;
+            }
+        }
+        visiting.erase(st);
+    }
+
+    return false;
+}
+
+static bool TypeContainsExtern(const TypeRef& type)
+{
+    std::unordered_set<const StructType*> visiting;
+    return TypeContainsExternImpl(type, visiting);
+}
+
 // SetterInfo: describes how to emit a public setter for one member
 // ---------------------------------------------------------------------------
 struct SetterInfo
 {
-    std::string m_CleanedName;    // private member name (capitalized, no prefix)
-    std::string m_CppType;        // C++ param type  (empty when byte array)
-    bool        m_bByValue        = false; // true → pass by value; false → const ref
-    bool        m_bIsByteArray    = false; // true → member is uint8_t[N]
-    int         m_ByteArraySize   = 0;
-    std::string m_StructTypeName; // set when byte array originated from a struct field
+    std::string m_CleanedName;      // private member name (capitalized, no prefix)
+    std::string m_CppType;          // C++ param type  (empty when byte array)
+    bool        m_bByValue          = false; // true → pass by value; false → const ref
+    bool        m_bIsByteArray      = false; // true → member is uint8_t[N]
+    int         m_ByteArraySize     = 0;
+    std::string m_StructTypeName;   // set when byte array originated from a struct field
+    bool        m_bIsExternMemcpy   = false; // true → extern type; use memcpy(sizeof(T))
 };
 
 static std::vector<SetterInfo> CollectSetterInfos(
@@ -275,6 +317,15 @@ static std::vector<SetterInfo> CollectSetterInfos(
                 si.m_ByteArraySize  = lm->m_Size;
                 si.m_StructTypeName = (*sp)->m_Name;
             }
+        }
+        else if (auto* ext = std::get_if<ExternType>(&mv.m_Type))
+        {
+            // Extern type: assumed trivially copyable and memcpy-safe.
+            // sizeof(T) is not known at generation time, so the setter uses
+            // std::memcpy(&field, &value, sizeof(T)) rather than direct assignment.
+            // std::is_trivially_copyable_v<T> is checked by a static_assert in the header.
+            si.m_CppType          = ext->m_Name;
+            si.m_bIsExternMemcpy  = true;
         }
         else if (std::holds_alternative<std::shared_ptr<ArrayNode>>(lm->m_Type))
         {
@@ -395,6 +446,18 @@ static void EmitMembersCpp(std::ostringstream& out,
             continue;
         }
 
+        // === ExternType field ===
+        if (auto* ext = std::get_if<ExternType>(&mv.m_Type))
+        {
+            // Extern type: emit the field using the external type name directly (no srrhi:: prefix).
+            // srrhi assumes sizeof(T) % 16 == 0 and alignof(T) >= 16 for cbuffer packing;
+            // the static_asserts at the top of this header enforce those constraints.
+            // Cursor is not advanced because sizeof is unknown to the layout engine.
+            out << ind << ext->m_Name << " " << fieldName << ";\n";
+            cursor = fieldOffset;
+            continue;
+        }
+
         // === BuiltinType or ArrayNode field ===
         if (!lm) { cursor = fieldOffset; continue; }
 
@@ -472,7 +535,7 @@ static void EmitClassCpp(std::ostringstream& out, const StructType& st,
 
     bool bNeedsMemcpy = false;
     for (const auto& si : setterInfos)
-        if (si.m_bIsByteArray) { bNeedsMemcpy = true; break; }
+        if (si.m_bIsByteArray || si.m_bIsExternMemcpy) { bNeedsMemcpy = true; break; }
 
     if (bEmitValidation)
         out << "class alignas(16) " << st.m_Name << "\n{\nfriend struct " << st.m_Name
@@ -508,6 +571,15 @@ static void EmitClassCpp(std::ostringstream& out, const StructType& st,
                     << si.m_ByteArraySize << "); }\n";
             }
         }
+        else if (si.m_bIsExternMemcpy)
+        {
+            // Extern type setter: memcpy is used because sizeof(T) is not known at
+            // generation time and direct assignment may not be safe for all extern types.
+            // The type is required to be trivially copyable (checked by static_assert in header).
+            out << "    void " << setterName << "(const " << si.m_CppType << "& value)"
+                << " { std::memcpy(&" << si.m_CleanedName
+                << ", &value, sizeof(" << si.m_CppType << ")); }\n";
+        }
         else if (si.m_bByValue)
         {
             out << "    void " << setterName << "(" << si.m_CppType << " value)"
@@ -530,12 +602,31 @@ static void EmitClassCpp(std::ostringstream& out, const StructType& st,
     if (bEmitValidation)
     {
         out << "// Friend validator struct for compile-time offset validation\n";
+        out << "// Note: offsets after an extern-containing member are not asserted,\n";
+        out << "// because extern sizes are unknown at generation time.\n";
         out << "struct " << st.m_Name << "Validator {\n";
-        for (const auto& localMem : layout.m_Submembers)
+        bool bFollowingOffsetsUnknown = false;
+        const size_t count = std::min(st.m_Members.size(), layout.m_Submembers.size());
+        for (size_t i = 0; i < count; ++i)
         {
-            out << "    static_assert(offsetof(" << st.m_Name << ", " << CleanMemberName(localMem.m_Name)
-                << ") == " << localMem.m_Offset << ", \""
-                << st.m_Name << "::" << CleanMemberName(localMem.m_Name) << " offset check\");\n";
+            const auto& mv = st.m_Members[i];
+            const auto& localMem = layout.m_Submembers[i];
+            const std::string cleanName = CleanMemberName(localMem.m_Name);
+
+            if (!bFollowingOffsetsUnknown)
+            {
+                out << "    static_assert(offsetof(" << st.m_Name << ", " << cleanName
+                    << ") == " << localMem.m_Offset << ", \""
+                    << st.m_Name << "::" << cleanName << " offset check\");\n";
+            }
+            else
+            {
+                out << "    // Offset check skipped for '" << cleanName
+                    << "' (a previous member contains an extern type with unknown size).\n";
+            }
+
+            if (TypeContainsExtern(mv.m_Type))
+                bFollowingOffsetsUnknown = true;
         }
         out << "};\n\n";
     }
@@ -556,6 +647,12 @@ static void EmitStructCpp(std::ostringstream& out, const StructType& st,
     {
         if (auto* sp = std::get_if<StructType*>(&mv.m_Type))
             out << fInd << (*sp)->m_Name << " " << mv.m_Name << ";\n";
+        else if (auto* ext = std::get_if<ExternType>(&mv.m_Type))
+        {
+            // Extern type: emit the field using the external type name directly (no srrhi:: prefix).
+            // The type must be visible at the point this header is included (see header-top comment).
+            out << fInd << ext->m_Name << " " << mv.m_Name << ";\n";
+        }
         else if (auto* bt = std::get_if<BuiltinType>(&mv.m_Type))
         {
             auto cti = MapBuiltinToCpp(*bt);
@@ -623,11 +720,27 @@ std::string GenerateCpp(const ParseResult& pr,
 
     std::ostringstream out;
     out << "// Auto-generated by srrhi. Do not edit.\n";
+
+    // Emit the extern type list as a comment so validation stub generators can
+    // forward-declare these types before including this header.
+    if (!pr.m_ExternTypeNames.empty())
+    {
+        out << "// SRRHI_EXTERN_TYPES:";
+        for (const auto& extName : pr.m_ExternTypeNames)
+            out << " " << extName;
+        out << "\n";
+    }
+
     out << "#pragma once\n";
 
-    // Include <cstring> for std::memcpy used in byte-array setters
+    // Include <cstring> for std::memcpy used in byte-array and extern-type setters
     if (!pr.m_SrInputDefs.empty())
         out << "#include <cstring>\n";
+
+    // Include <type_traits> for the static_assert on std::is_trivially_copyable_v
+    // emitted for each extern type.
+    if (!pr.m_ExternTypeNames.empty())
+        out << "#include <type_traits>\n";
 
     // Include srrhi.h for ResourceEntry and ResourceType (resource binding API).
     // Needed when any srinput (including via composition) has cbuffer refs, SRV/UAV resources, or samplers.
@@ -662,6 +775,45 @@ std::string GenerateCpp(const ParseResult& pr,
     }
 
     out << "\n";
+
+    // Emit static_asserts and a usage note for any 'extern'-declared types.
+    // These run at the user's compile time to validate the 16-byte assumptions
+    // that srrhi makes about extern types' size and alignment.
+    if (!pr.m_ExternTypeNames.empty())
+    {
+        out << "// ---------------------------------------------------------------------------\n";
+        out << "// Extern type constraints\n";
+        out << "//\n";
+        out << "// The following types were declared 'extern' in the .sr source.  srrhi does\n";
+        out << "// not define them; they must be defined externally by the user.  srrhi makes\n";
+        out << "// three assumptions about each extern type for correct HLSL cbuffer packing\n";
+        out << "// and safe CPU-side upload:\n";
+        out << "//   1. sizeof(T) % 16 == 0           -- size is a multiple of 16 (one HLSL register)\n";
+        out << "//   2. alignof(T) >= 16               -- at least 16-byte aligned (cbuffer slot boundary)\n";
+        out << "//   3. std::is_trivially_copyable_v<T> -- safe to memcpy into the cbuffer upload buffer\n";
+        out << "//\n";
+        out << "// The static_asserts below verify these assumptions at compile time.\n";
+        out << "// If an assert fires, adjust the extern type to satisfy the constraint.\n";
+        out << "//\n";
+        out << "// IMPORTANT -- extern types must be visible before including this header:\n";
+        out << "//   Either #include the header(s) that define these types before this file,\n";
+        out << "//   or define them directly above the #include of this generated header.\n";
+        out << "// ---------------------------------------------------------------------------\n";
+        for (const auto& extName : pr.m_ExternTypeNames)
+        {
+            out << "static_assert(sizeof(" << extName << ") % 16 == 0,\n";
+            out << "    \"srrhi: extern type '" << extName
+                << "' must have sizeof divisible by 16 (HLSL cbuffer packing)\");\n";
+            out << "static_assert(alignof(" << extName << ") >= 16,\n";
+            out << "    \"srrhi: extern type '" << extName
+                << "' must be at least 16-byte aligned (HLSL cbuffer packing)\");\n";
+            out << "static_assert(std::is_trivially_copyable_v<" << extName << ">,\n";
+            out << "    \"srrhi: extern type '" << extName
+                << "' must be trivially copyable (memcpy-safe for cbuffer upload)\");\n";
+        }
+        out << "\n";
+    }
+
     out << "namespace srrhi\n{\n\n";
 
     // Build a set of cbuffer names that are in srinput scopes (including transitive composition).

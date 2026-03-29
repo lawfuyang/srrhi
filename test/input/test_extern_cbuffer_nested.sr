@@ -1,0 +1,22 @@
+// test_extern_cbuffer_nested.sr
+// Valid use case: extern type nested through struct composition into a cbuffer.
+// This validates composed extern usage rather than direct-only placement.
+
+extern ExternalNestedType;
+
+struct NestedPayload
+{
+    ExternalNestedType m_External;
+    float4             m_Params;
+};
+
+cbuffer ExternalNestedCBuffer
+{
+    NestedPayload m_Nested;
+    float4        m_Extra;
+};
+
+srinput ExternalNestedInputs
+{
+    ExternalNestedCBuffer m_nestedCb;
+};

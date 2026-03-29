@@ -1,0 +1,7 @@
+// test_extern_type_alias.sr
+// Error: 'extern' cannot be applied to a name that is already a type alias.
+// Expected failure: "extern VecAlias" when VecAlias is already a typedef.
+
+typedef float4 VecAlias;
+
+extern VecAlias;  // conflict: VecAlias is already a type alias

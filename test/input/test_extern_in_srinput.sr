@@ -1,0 +1,11 @@
+// test_extern_in_srinput.sr
+// Tests 'extern' declarations inside an srinput body scope.
+// The declared extern type is then used as a resource template argument.
+
+srinput MyPassInputs
+{
+    extern MyExternalType;
+
+    StructuredBuffer<MyExternalType>   m_BufferOfAlienStuff;
+    RWStructuredBuffer<MyExternalType> m_OutputBuffer;
+};

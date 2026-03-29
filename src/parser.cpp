@@ -204,6 +204,10 @@ struct Parser
     // Maps srinput name to index in m_Result.m_SrInputDefs (indices are stable)
     std::unordered_map<std::string, size_t> m_SrInputMap;
 
+    // Extern type declarations: type names declared with 'extern TypeName;'.
+    // These are external types with no definition in any .sr file.
+    std::unordered_set<std::string> m_ExternMap;
+
     // -------------------------------------------------------------------------
     // Preprocessor state
     // -------------------------------------------------------------------------
@@ -301,6 +305,96 @@ struct Parser
     {
         while (m_Cur.m_Kind != TokKind::Eof && m_Cur.m_Line == line)
             Advance();
+    }
+
+    // -----------------------------------------------------------------------
+    // Returns true if the given identifier is a builtin/native type name
+    // (scalar, vector, matrix, resource, or sampler keyword).
+    // Used to validate 'extern' declarations.
+    // -----------------------------------------------------------------------
+    static bool IsNativeTypeName(const std::string& name)
+    {
+        // Scalar base types (and their sized variants)
+        static const std::vector<std::string> k_ScalarPrefixes = {
+            "float16_t", "float32_t", "float64_t",
+            "int16_t", "uint16_t", "int32_t", "uint32_t", "int64_t", "uint64_t",
+            "double", "float", "bool", "int", "uint",
+        };
+        for (const auto& sc : k_ScalarPrefixes)
+        {
+            if (name == sc) return true;
+            // vector: floatN, intN, uintN etc.
+            if (name.size() == sc.size() + 1 && name.rfind(sc, 0) == 0 &&
+                std::isdigit((unsigned char)name.back()))
+                return true;
+            // matrix: floatNxM
+            if (name.size() == sc.size() + 3 && name.rfind(sc, 0) == 0 &&
+                std::isdigit((unsigned char)name[sc.size()]) &&
+                name[sc.size() + 1] == 'x' &&
+                std::isdigit((unsigned char)name[sc.size() + 2]))
+                return true;
+        }
+        // matrix / vector template types
+        if (name == "matrix" || name == "vector") return true;
+        // Resource types
+        static const std::vector<std::string> k_ResourceNames = {
+            "Texture1D", "Texture1DArray", "Texture2D", "Texture2DArray",
+            "Texture2DMS", "Texture2DMSArray", "Texture3D",
+            "TextureCube", "TextureCubeArray", "TextureBuffer",
+            "Buffer", "StructuredBuffer", "ByteAddressBuffer",
+            "RaytracingAccelerationStructure", "ConstantBuffer",
+            "RWTexture1D", "RWTexture1DArray", "RWTexture2D", "RWTexture2DArray",
+            "RWTexture3D", "RWBuffer", "RWStructuredBuffer", "RWByteAddressBuffer",
+            "AppendStructuredBuffer", "ConsumeStructuredBuffer",
+        };
+        for (const auto& r : k_ResourceNames)
+            if (name == r) return true;
+        // Sampler types
+        if (name == "SamplerState" || name == "SamplerComparisonState") return true;
+        return false;
+    }
+
+    // -----------------------------------------------------------------------
+    // Handle 'extern TypeName;' declaration (at global, struct, or srinput scope).
+    // m_Cur is positioned on the type-name token after 'extern'.
+    // Registers the type name in m_ExternMap and m_Result.m_ExternTypeNames.
+    // -----------------------------------------------------------------------
+    void HandleExternDecl(int externLine)
+    {
+        if (m_Cur.m_Kind != TokKind::Ident)
+            throw std::runtime_error(m_FilePath + ":" + std::to_string(externLine) +
+                                     ": expected type name after 'extern'");
+
+        std::string typeName = m_Cur.m_Text;
+        int nameLine = m_Cur.m_Line;
+        Advance(); // consume the type name
+
+        // Block native/builtin types
+        if (IsNativeTypeName(typeName))
+            throw std::runtime_error(m_FilePath + ":" + std::to_string(nameLine) +
+                                     ": 'extern' cannot be used with native type '" + typeName +
+                                     "'; only externally-defined user types may be declared extern");
+
+        // Block already-defined struct names
+        if (m_StructMap.count(typeName))
+            throw std::runtime_error(m_FilePath + ":" + std::to_string(nameLine) +
+                                     ": 'extern " + typeName + "' conflicts with an already-defined struct");
+
+        // Block type aliases (typedef / using / #define)
+        if (m_TypeAliases.count(typeName))
+            throw std::runtime_error(m_FilePath + ":" + std::to_string(nameLine) +
+                                     ": 'extern " + typeName + "' conflicts with an existing type alias");
+
+        // Block srinput names
+        if (m_SrInputMap.count(typeName))
+            throw std::runtime_error(m_FilePath + ":" + std::to_string(nameLine) +
+                                     ": 'extern " + typeName + "' conflicts with an srinput name");
+
+        Expect(TokKind::Semicolon, ";");
+
+        // Idempotent: re-declaring the same extern type is allowed
+        m_ExternMap.insert(typeName);
+        m_Result.m_ExternTypeNames.insert(typeName);
     }
 
     // -----------------------------------------------------------------------
@@ -754,6 +848,13 @@ struct Parser
             m_Result.m_IncludedStructNames.insert(name);
         for (const auto& name : inc.m_IncludedStructNames)
             m_Result.m_IncludedStructNames.insert(name);
+
+        // Propagate extern type declarations from the included file.
+        for (const auto& extName : inc.m_ExternTypeNames)
+        {
+            m_ExternMap.insert(extName);
+            m_Result.m_ExternTypeNames.insert(extName);
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -917,6 +1018,18 @@ struct Parser
                                          " to type alias '" + name + "'");
             m_LastResolvedAliasName = name; // remember original name for HLSL output
             return aliasIt->second;
+        }
+
+        // Externally-defined type declared with 'extern TypeName;'
+        if (m_ExternMap.count(name))
+        {
+            if (bIsRowMajor)
+                throw std::runtime_error(m_FilePath + ":" + std::to_string(nameLine) +
+                                         ": row_major/column_major qualifier cannot be applied"
+                                         " to extern type '" + name + "'");
+            ExternType ext;
+            ext.m_Name = name;
+            return ext;
         }
 
         throw std::runtime_error(m_FilePath + ":" + std::to_string(nameLine) +
@@ -1138,6 +1251,15 @@ struct Parser
             }
             // Skip member declarations in inactive preprocessor branches.
             if (!IsActive()) { Advance(); continue; }
+
+            // Handle 'extern TypeName;' declarations inside struct/cbuffer body.
+            if (m_Cur.m_Kind == TokKind::Ident && m_Cur.m_Text == "extern")
+            {
+                int externLine = m_Cur.m_Line;
+                Advance(); // consume 'extern'
+                HandleExternDecl(externLine);
+                continue;
+            }
 
             size_t prevCount = members.size();
             ParseMemberVariables(members);
@@ -1460,6 +1582,15 @@ struct Parser
                     }
                     // Skip declarations in inactive preprocessor branches.
                     if (!IsActive()) { Advance(); continue; }
+
+                    // Handle 'extern TypeName;' declarations inside srinput body.
+                    if (m_Cur.m_Kind == TokKind::Ident && m_Cur.m_Text == "extern")
+                    {
+                        int externLine = m_Cur.m_Line;
+                        Advance(); // consume 'extern'
+                        HandleExternDecl(externLine);
+                        continue;
+                    }
 
                     // ---- Attribute annotation: [push_constant] ----
                     bool bNextIsPushConstant = false;
@@ -1791,14 +1922,24 @@ struct Parser
                             {
                                 if (bRequiresStruct)
                                 {
-                                    // Struct-typed resources must reference a visible struct definition.
-                                    throw std::runtime_error(m_FilePath + ":" + std::to_string(argTok.m_Line) +
-                                                             ": resource template argument '" + argTok.m_Text +
-                                                             "' is not a defined struct");
+                                    // Allow extern types as StructuredBuffer/RWStructuredBuffer template args.
+                                    if (m_ExternMap.count(templateArg) == 0)
+                                    {
+                                        // Struct-typed resources must reference a visible struct definition
+                                        // or a declared extern type.
+                                        throw std::runtime_error(m_FilePath + ":" + std::to_string(argTok.m_Line) +
+                                                                 ": resource template argument '" + argTok.m_Text +
+                                                                 "' is not a defined struct or extern type");
+                                    }
+                                    // extern type used as StructuredBuffer template arg — valid
+                                    templateArg = originalTemplateArg; // use the raw name (no srrhi:: prefix)
                                 }
-                                // Other resource types: treat as externally-defined macro (e.g. SPD_TYPE).
-                                // DXC will validate at compile time.
-                                templateArg = originalTemplateArg;
+                                else
+                                {
+                                    // Other resource types: treat as externally-defined macro (e.g. SPD_TYPE).
+                                    // DXC will validate at compile time.
+                                    templateArg = originalTemplateArg;
+                                }
                             }
 
                             Expect(TokKind::RAngle, ">");
@@ -1964,6 +2105,14 @@ struct Parser
                 continue;
             }
 
+            // ---- extern TypeName; ----
+            if (kw == "extern")
+            {
+                Advance(); // consume 'extern'
+                HandleExternDecl(m_Cur.m_Line);
+                continue;
+            }
+
             // ---- typedef BaseType AliasName; ----
             if (kw == "typedef")
             {
@@ -2021,6 +2170,8 @@ int TypeAlignment(const TypeRef& t)
         return bt->m_Alignment;
     if (auto* ap = std::get_if<std::shared_ptr<ArrayNode>>(&t))
         return TypeAlignment((*ap)->m_ElementType);
+    if (std::get_if<ExternType>(&t))
+        return 4; // unknown alignment; default to 4 (skipped by layout engine)
     return 16; // StructType* -> always 16-byte aligned in cbuffers
 }
 
@@ -2032,6 +2183,8 @@ std::string TypeDisplayName(const TypeRef& t)
         return (*ap)->m_Name;
     if (auto* sp = std::get_if<StructType*>(&t))
         return "struct " + (*sp)->m_Name;
+    if (auto* ext = std::get_if<ExternType>(&t))
+        return ext->m_Name;
     return "???";
 }
 

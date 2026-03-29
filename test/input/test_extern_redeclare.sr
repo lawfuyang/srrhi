@@ -1,0 +1,12 @@
+// test_extern_redeclare.sr
+// Tests that re-declaring the same extern type is idempotent (no error).
+
+extern MyExternType;
+extern MyExternType;  // re-declaration: should be valid (idempotent)
+
+struct UseExtern
+{
+    extern MyExternType;   // re-declaration inside struct: also valid
+
+    MyExternType m_Field;
+};

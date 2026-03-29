@@ -29,12 +29,24 @@ struct BuiltinType
 };
 
 // ---------------------------------------------------------------------------
-// TypeRef: tagged reference to any of the three type kinds.
+// ExternType: an externally-defined type declared with 'extern TypeName;'.
+//   Not defined in any .sr file; assumed to be provided by the including code.
+//   Valid as a struct member type or resource template argument.
+//   Size/alignment are unknown — the layout engine skips such fields.
+// ---------------------------------------------------------------------------
+struct ExternType
+{
+    std::string m_Name;  // e.g. "MyExternalStruct"
+};
+
+// ---------------------------------------------------------------------------
+// TypeRef: tagged reference to any of the four type kinds.
 //   BuiltinType                  – scalar or vector
 //   shared_ptr<ArrayNode>        – array or matrix (heap for recursive nesting)
 //   StructType*                  – named struct reference (non-owning; resolved post-parse)
+//   ExternType                   – externally-defined type (declared with 'extern TypeName;')
 // ---------------------------------------------------------------------------
-using TypeRef = std::variant<BuiltinType, std::shared_ptr<ArrayNode>, StructType*>;
+using TypeRef = std::variant<BuiltinType, std::shared_ptr<ArrayNode>, StructType*, ExternType>;
 
 // ---------------------------------------------------------------------------
 // ArrayNode: array of elementType (also used for column/row-major matrices).
@@ -271,6 +283,12 @@ struct ParseResult
     // Generators use this to skip re-emitting struct definitions already
     // covered by the emitted #include directives.
     std::unordered_set<std::string>  m_IncludedStructNames;
+
+    // Names of types declared as 'extern' in this .sr file (or its includes).
+    // These types are external to srrhi and have no definition here.
+    // Generators use this to emit forward declarations in validation stubs and
+    // to avoid adding a srrhi:: prefix when referencing these types in C++.
+    std::unordered_set<std::string>  m_ExternTypeNames;
 
     // Top-level declaration order: tracks the order in which structs, buffer
     // definitions, and srinput definitions were declared in the *local* .sr file

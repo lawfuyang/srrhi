@@ -103,6 +103,24 @@ class CBufferLayout
             LayoutMember lm = LayoutStruct(**sp, name);
             parent.PushSubmember(std::move(lm));
         }
+        else if (auto* ext = std::get_if<ExternType>(&type))
+        {
+            // ExternType: the actual sizeof is not known at generation time.
+            // srrhi assumes the type satisfies both:
+            //   - sizeof(T) % 16 == 0  (size is a multiple of one HLSL register)
+            //   - alignof(T) >= 16     (16-byte aligned, matching cbuffer packing rules)
+            // These constraints are enforced by static_asserts in the generated C++ header.
+            // We align to 16 before placement to reflect the alignment assumption.
+            // m_CurOffset is NOT advanced after placement because sizeof is unknown;
+            // offsets for any fields that follow an extern member are therefore approximate.
+            AlignTo16();
+            LayoutMember lm;
+            lm.m_Type   = *ext;
+            lm.m_Name   = name;
+            lm.m_Offset = m_CurOffset;
+            lm.m_Size   = 0;
+            parent.PushSubmember(std::move(lm));
+        }
     }
 
 public:

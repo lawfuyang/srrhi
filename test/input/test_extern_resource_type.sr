@@ -1,0 +1,5 @@
+// test_extern_resource_type.sr
+// Error: 'extern' cannot be applied to a resource keyword (Texture2D).
+// Expected failure: "extern Texture2D" is not allowed.
+
+extern Texture2D;

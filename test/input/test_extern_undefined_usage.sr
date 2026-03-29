@@ -1,0 +1,8 @@
+// test_extern_undefined_usage.sr
+// Error: Using a type name that has NOT been declared extern (and is not
+// a native type or defined struct) should fail with "unrecognized type".
+
+struct UsesUndeclaredType
+{
+    SomeUndeclaredType m_Field;  // NOT declared extern -> should fail
+};

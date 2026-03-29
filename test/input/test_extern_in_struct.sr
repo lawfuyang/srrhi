@@ -1,0 +1,12 @@
+// test_extern_in_struct.sr
+// Tests 'extern' declarations inside a struct body scope.
+// The declared extern type is usable within that struct
+// (and after the struct, since extern types are global).
+
+struct MyCustomStruct
+{
+    extern MyExternalStructAgain;
+
+    MyExternalStructAgain m_ExternalStuffAgain;
+    float                 m_Value;
+};

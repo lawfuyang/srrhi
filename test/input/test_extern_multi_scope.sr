@@ -1,0 +1,24 @@
+// test_extern_multi_scope.sr
+// Tests extern declarations in all three scopes simultaneously.
+// Exercises: global extern, struct-body extern, srinput-body extern,
+// usage as struct member, and usage as resource template arg.
+
+extern MyGlobalExternType;  // global scope
+
+struct StructWithExtern
+{
+    extern MyStructScopedType;          // struct scope
+
+    MyGlobalExternType    m_FromGlobal;
+    MyStructScopedType    m_FromStruct;
+    float                 m_NativeValue;
+};
+
+srinput MultiExternInputs
+{
+    extern MyInputScopedType;           // srinput scope
+
+    StructuredBuffer<MyGlobalExternType>    m_GlobalTypeBuffer;
+    StructuredBuffer<MyStructScopedType>    m_StructTypeBuffer;
+    StructuredBuffer<MyInputScopedType>     m_InputScopedBuffer;
+};

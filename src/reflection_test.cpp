@@ -115,6 +115,12 @@ static const std::unordered_set<std::string> k_ExpectedFailStems = {
     "test_define_endif_without_if",
     "test_define_unclosed_if",
     "test_define_elif_after_else",
+    // Extern type error tests
+    "test_extern_native_type",
+    "test_extern_resource_type",
+    "test_extern_known_struct",
+    "test_extern_type_alias",
+    "test_extern_undefined_usage",
 };
 
 // ---------------------------------------------------------------------------
@@ -737,6 +743,16 @@ int RunReflectionTests(const fs::path& testInputDir)
         if (layouts.empty())
         {
             LogMsg("[test]   PASS  (no cbuffers to validate — parse+layout+hlslgen OK)\n");
+            ++passed;
+            continue;
+        }
+
+        // Extern types are valid in generated C++ headers, but this reflection
+        // harness compiles HLSL in isolation and does not provide concrete HLSL
+        // definitions for those external user types. Skip DXC reflection in this case.
+        if (!pr.m_ExternTypeNames.empty())
+        {
+            LogMsg("[test]   PASS  (extern types present -- skipping DXC reflection in test harness)\n");
             ++passed;
             continue;
         }

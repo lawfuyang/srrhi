@@ -45,6 +45,9 @@ static std::string HlslTypeName(const TypeRef& t)
     if (auto* sp = std::get_if<StructType*>(&t))
         return (*sp)->m_Name;
 
+    if (auto* ext = std::get_if<ExternType>(&t))
+        return ext->m_Name;  // emit the external type name as-is
+
     return "???";
 }
 
@@ -105,6 +108,11 @@ static void EmitStructBodyHlsl(std::ostringstream& out,
         {
             // Struct field
             out << fInd << (*structP)->m_Name << " " << mv.m_Name << ";\n";
+        }
+        else if (auto* ext = std::get_if<ExternType>(&mv.m_Type))
+        {
+            // Extern type field: emit the external type name as-is
+            out << fInd << ext->m_Name << " " << mv.m_Name << ";\n";
         }
         else if (auto* ap = std::get_if<std::shared_ptr<ArrayNode>>(&mv.m_Type))
         {

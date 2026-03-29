@@ -1,0 +1,17 @@
+// test_extern_cbuffer_direct.sr
+// Valid use case: extern type composed directly inside a cbuffer field.
+// Assumes extern type satisfies srrhi extern constraints:
+//   sizeof(T) % 16 == 0, alignof(T) >= 16, and trivially copyable.
+
+extern ExternalCBufferPayload;
+
+cbuffer ExternalCBuffer
+{
+    ExternalCBufferPayload m_Payload;
+    float4                 m_Color;
+};
+
+srinput ExternalCBufferInputs
+{
+    ExternalCBuffer m_externalCb;
+};

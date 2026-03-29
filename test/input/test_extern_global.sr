@@ -1,0 +1,17 @@
+// test_extern_global.sr
+// Tests 'extern' declarations at global scope.
+// The extern type is then used as a struct member and as a
+// StructuredBuffer template argument inside an srinput.
+
+extern MyExternalStruct;
+
+struct MyCustomStruct
+{
+    MyExternalStruct m_ExternalStuff;
+    float            m_Value;
+};
+
+srinput MyPassInputs
+{
+    StructuredBuffer<MyExternalStruct> m_BufferOfExternalStuff;
+};

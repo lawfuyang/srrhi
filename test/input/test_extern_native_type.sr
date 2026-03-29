@@ -1,0 +1,5 @@
+// test_extern_native_type.sr
+// Error: 'extern' cannot be applied to a native (builtin) type.
+// Expected failure: "extern float" is not allowed.
+
+extern float;

@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <stdexcept>
 
 #include "types.h"
@@ -65,6 +66,10 @@ static void WriteFile(const fs::path& path, const std::string& content)
 // Each stub simply includes the header and compiles it.  All static_assert
 // register-index checks are emitted directly by the C++ code generator into
 // the header itself, so no extra logic is needed here.
+//
+// If the header declares extern types (via "// SRRHI_EXTERN_TYPES: T1 T2 ...")
+// sentinel comment, the stub emits empty struct definitions for those types so
+// the stub compiles without requiring the real definitions.
 // ---------------------------------------------------------------------------
 static int GenerateValidationStubs(const fs::path& headerDir)
 {
@@ -89,21 +94,58 @@ static int GenerateValidationStubs(const fs::path& headerDir)
         std::string stubName   = "validation_" + stem + ".cpp";
         fs::path    stubPath   = headerDir / stubName;
 
-        std::string code =
-            "// Auto-generated validation stub for " + headerName + "\n"
-            "// Compile-time layout and register-index validation is done via\n"
-            "// static_assert statements emitted directly into the header.\n"
-            "\n"
-            "#include <windows.h>\n"
-            "#include <DirectXMath.h>\n"
-            "\n"
-            "#include \"" + headerName + "\"\n"
-            "\n"
-            "int main() { return 0; }\n";
+        // Scan the first few lines of the generated header for the extern-types comment.
+        // Format: "// SRRHI_EXTERN_TYPES: TypeA TypeB TypeC"
+        std::vector<std::string> externTypes;
+        {
+            std::ifstream hf(hFile);
+            std::string line;
+            int lineNum = 0;
+            while (std::getline(hf, line) && lineNum < 5)
+            {
+                ++lineNum;
+                const std::string prefix = "// SRRHI_EXTERN_TYPES:";
+                if (line.size() >= prefix.size() && line.substr(0, prefix.size()) == prefix)
+                {
+                    std::string rest = line.substr(prefix.size());
+                    std::istringstream iss(rest);
+                    std::string typeName;
+                    while (iss >> typeName)
+                        externTypes.push_back(typeName);
+                    break;
+                }
+            }
+        }
+
+        // Build the stub content.
+        std::ostringstream code;
+        code << "// Auto-generated validation stub for " << headerName << "\n"
+             << "// Compile-time layout and register-index validation is done via\n"
+             << "// static_assert statements emitted directly into the header.\n"
+             << "\n"
+             << "#include <windows.h>\n"
+             << "#include <DirectXMath.h>\n"
+             << "\n";
+
+        // Emit stub definitions for all declared extern types.
+        // These stubs must satisfy the static_asserts emitted in the generated header:
+        //   sizeof(T) % 16 == 0  and  alignof(T) >= 16
+        // An alignas(16) struct with a 16-byte pad member fulfils both constraints.
+        if (!externTypes.empty())
+        {
+            code << "// Stub definitions for extern types (compilation testing only — not the real types)\n";
+            for (const auto& typeName : externTypes)
+                code << "struct alignas(16) " << typeName << " { uint8_t _srrhi_stub_pad[16]; };\n";
+            code << "\n";
+        }
+
+        code << "#include \"" << headerName << "\"\n";
+        code << "\n"
+             << "int main() { return 0; }\n";
 
         try
         {
-            WriteFile(stubPath, code);
+            WriteFile(stubPath, code.str());
             LogMsg("[srrhi]   -> %s\n", stubPath.string().c_str());
             ++count;
         }

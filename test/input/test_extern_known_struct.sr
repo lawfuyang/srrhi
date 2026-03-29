@@ -1,0 +1,10 @@
+// test_extern_known_struct.sr
+// Error: 'extern' cannot be applied to a struct that is already defined.
+// Expected failure: "extern MyStruct" when MyStruct is already defined.
+
+struct MyStruct
+{
+    float m_Value;
+};
+
+extern MyStruct;  // conflict: MyStruct is already a defined struct
