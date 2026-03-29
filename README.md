@@ -41,6 +41,50 @@ srinput ForwardPass
 
 **`#include`** — `.sr` files can include other `.sr` files to share struct and cbuffer definitions across passes.
 
+**`extern TypeName;`** — declare externally-defined user types that are not defined in any `.sr` file. These can be used in structs, cbuffers, and resource template arguments (for structured buffers).
+
+```hlsl
+extern GPUSceneBlock;
+
+cbuffer FrameData
+{
+    GPUSceneBlock scene;
+};
+
+srinput FramePass
+{
+    StructuredBuffer<GPUSceneBlock> m_SceneHistory;
+    FrameData m_Frame;
+};
+```
+
+**Type aliases** — aliases are supported via all three forms: `typedef`, `using`, and `#define` type aliases.
+
+```hlsl
+typedef float4 Color4;
+using Position3 = float3;
+#define NORMAL_T float3
+
+struct VertexData
+{
+    Position3 position;
+    NORMAL_T  normal;
+    Color4    color;
+};
+```
+
+**Preprocessor conditionals** — file-scope directives are supported (`#if`, `#ifdef`, `#ifndef`, `#elif`, `#else`, `#endif`, `defined(...)`, logical operators), and are preserved in generated HLSL where applicable.
+
+```hlsl
+#define USE_MSAA 1
+
+#if USE_MSAA
+Texture2DMS<float4> m_Color;
+#else
+Texture2D<float4> m_Color;
+#endif
+```
+
 **`[push_constant]`** — annotate a cbuffer member inside an `srinput` to mark it as a push-constant / root constant.
 
 ```hlsl
@@ -66,7 +110,21 @@ srinput RenderInputs
 };
 ```
 
-**`[space(N)]` register space attribute** — optionally specify an explicit HLSL register space for an `srinput` scope. By default, register spaces are not emitted in HLSL (`space0` is implicit). This is useful when:
+Scalar constants can also drive array sizes in later declarations via `SrInputName::ConstName`:
+
+```hlsl
+srinput Config
+{
+    static const uint MaxLights = 64;
+};
+
+struct LightCluster
+{
+    float4 lightData[Config::MaxLights];
+};
+```
+
+**`[space(N)]` register space attribute** — optionally specify an explicit HLSL register space for an `srinput` scope. By default, generated HLSL omits `space` qualifiers (`space0` is implicit). This is useful when:
 
 - Binding different shader passes that share resource layouts but need to operate independently within a single shader (e.g., deferred rendering multiple passes in one shader).
 - Organizing large shaders into logical groups that have separate descriptor heaps or descriptor tables.
@@ -104,7 +162,7 @@ srinput PostPass
 };
 ```
 
-In the generated C++ header, the `RegisterSpace` constant is only emitted when `[space(N)]` is specified:
+In generated C++, `RegisterSpace` is always emitted. If `[space(N)]` is not specified, it defaults to `0`.
 
 ```cpp
 struct MainPass
@@ -136,14 +194,21 @@ Each `.sr` file produces a C++ header inside `srrhi` namespace containing:
 - **`srinput` structs** — plain structs that hold:
   - The cbuffer class instances as data members.
   - `static constexpr uint32_t` register index constants (`FrameRegisterIndex`, `NumCBuffers`, `NumSRVs`, `NumUAVs`, `NumSamplers`, `NumResources`, …).
-  - **`RegisterSpace`** — emitted only if the `srinput` was decorated with `[space(N)]`. Contains the register space index as a compile-time constant.
+    - **`RegisterSpace`** — always present. Defaults to `0` when no `[space(N)]` attribute is set.
+    - **`PushConstantBytes`** — byte size of the push-constant cbuffer in that flattened srinput (`0` when none is present).
   - Scalar constants as `static constexpr` members.
   - A flat `srrhi::ResourceEntry m_Resources[NumResources]` array with compile-time `slot` and `type` fields, ordered: CBuffers → SRVs → UAVs → Samplers.
   - Typed `Set*()` resource setters that write into `m_Resources`:
     - **Non-texture resources** (buffers, samplers, cbuffers, acceleration structures): `void SetFoo(void* pResource)`
     - **Texture SRVs** (non-array): simple `void SetFoo(void*)` + mip-range overload `void SetFoo(void*, int32_t baseMip, int32_t numMips)`
     - **Texture SRVs** (array): simple `void SetFoo(void*)` + full overload `void SetFoo(void*, int32_t baseMip, int32_t numMips, int32_t baseSlice, int32_t numSlices)`
-    - **Texture UAVs**: `void SetFoo(void*, int32_t baseMipLevel)` — `numMipLevels` is always hardcoded to 1.
+        - **Texture UAVs** (non-array): `void SetFoo(void*, int32_t baseMipLevel)` — `numMipLevels` is hardcoded to `1`.
+        - **Texture UAVs** (array): `void SetFoo(void*, int32_t baseMipLevel, int32_t baseSlice, int32_t numSlices)` — `numMipLevels` is hardcoded to `1`.
+
+- **Extern-type validation checks** — when `extern` types are used, generated headers emit compile-time checks requiring:
+    - `sizeof(T) % 16 == 0`
+    - `alignof(T) >= 16`
+    - `std::is_trivially_copyable_v<T>`
 
 - **`static_assert` register checks** — file-scope assertions that verify all `NumCBuffers`, `NumSRVs`, `NumUAVs`, `NumSamplers`, `NumResources`, and every `*RegisterIndex` constant at compile time.
 
@@ -174,6 +239,7 @@ Each `.sr` file also produces an `.hlsli` file (wrapped in an include guard) con
 | `RWStructuredBuffer<T>` | `StructuredBuffer_UAV` | `u#` |
 | `RWByteAddressBuffer` | `RawBuffer_UAV` | `u#` |
 | `cbuffer` reference | `ConstantBuffer` | `b#` |
+| `[push_constant]` cbuffer reference | `PushConstants` | `b#` |
 | `SamplerState` / `SamplerComparisonState` | `Sampler` | `s#` |
 
 ---
@@ -372,10 +438,10 @@ This pattern makes it easy to:
 
 ### No Register Space (Default Behavior)
 
-If you don't specify `[space(N)]`, all srinputs remain in the default register space (`space0`), and no `RegisterSpace` constant is emitted:
+If you don't specify `[space(N)]`, all srinputs remain in the default register space (`space0`):
 
 ```hlsl
-// Both use space0 implicitly, but different b# and t# within space0
+// Both use space0 implicitly; register numbers are local to each srinput scope.
 srinput Pass1
 {
     Consts1 m_C1;                // b0
@@ -384,8 +450,8 @@ srinput Pass1
 
 srinput Pass2
 {
-    Consts2 m_C2;                // b1 (resets after Pass1)
-    Texture2D<float4> m_Tex2;    // t1 (resets after Pass1)
+    Consts2 m_C2;                // b0 (new scope, counter resets)
+    Texture2D<float4> m_Tex2;    // t0 (new scope, counter resets)
 };
 ```
 
@@ -393,6 +459,12 @@ This is the right choice when:
 - Your shader only uses a single active srinput at a time
 - You're binding all resources to the default descriptor heap
 - You don't need independent resource groups with colliding register numbers
+
+Generated C++ still emits:
+
+```cpp
+static constexpr uint32_t RegisterSpace = 0;
+```
 
 ### Srinput Inheritance
 
@@ -738,3 +810,65 @@ Register layout for `CombinedPass`:
 - t0: Output
 
 ---
+
+### Extern Types in Generated C++
+
+When `.sr` uses `extern TypeName;`, generated C++ headers expect the type to be visible before including the generated header.
+
+```cpp
+// project_types.h
+struct alignas(16) GPUSceneBlock
+{
+    float data[16];
+};
+
+// render.cpp
+#include "project_types.h"
+#include "generated/cpp/frame_pass.h"
+```
+
+Generated headers perform static_assert checks to enforce cbuffer packing assumptions for extern types.
+
+### Preprocessor and Alias Patterns
+
+SRRHI supports HLSL-style feature toggles and aliases in `.sr` files. A practical pattern is to define type aliases once, then select resources by build flags:
+
+```hlsl
+#define HIST_T float4
+using NormalT = float3;
+
+#if defined(USE_HISTORY) && USE_HISTORY
+Texture2D<HIST_T> m_History;
+#endif
+
+struct GBufferData
+{
+    NormalT normal;
+};
+```
+
+### Push Constant Usage Pattern
+
+Only one push constant is allowed per flattened srinput, and it must be the first cbuffer (`b0`).
+
+```hlsl
+cbuffer DrawPC
+{
+    uint drawId;
+    uint materialId;
+};
+
+cbuffer FrameCB
+{
+    float4x4 viewProj;
+};
+
+srinput DrawInputs
+{
+    [push_constant]
+    DrawPC m_Draw;
+    FrameCB m_Frame;
+};
+```
+
+Generated C++ exposes `PushConstantBytes` and marks that resource entry as `srrhi::ResourceType::PushConstants`.
