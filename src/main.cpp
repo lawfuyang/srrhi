@@ -121,11 +121,11 @@ static int GenerateValidationStubs(const fs::path& headerDir)
 
 // ---------------------------------------------------------------------------
 // Derive HLSL include-guard name from the output stem.
-// e.g. stem "sub/example" -> "EXAMPLE_HLSLI"
+// e.g. stem "sub/example" -> "SSRHI_EXAMPLE_HLSLI"
 // ---------------------------------------------------------------------------
 static std::string MakeHlslGuard(const fs::path& stem)
 {
-    std::string name = stem.filename().string() + "_HLSLI";
+    std::string name = "SSRHI_" + stem.filename().string() + "_HLSLI";
     for (char& c : name)
         c = std::isalnum((unsigned char)c) ? (char)std::toupper((unsigned char)c) : '_';
     return name;
