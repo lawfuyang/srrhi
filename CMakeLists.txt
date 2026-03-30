@@ -99,13 +99,22 @@ file(GLOB_RECURSE SOURCES
 )
 
 # Exclude hlsl_runtime_test.cpp from main srrhi executable (it's a separate target)
-list(FILTER SOURCES EXCLUDE REGEX "hlsl_runtime_test\\.cpp$")
+list(FILTER SOURCES EXCLUDE REGEX "hlsl_runtime_test\.cpp$")
+
+# Exclude reflection_test.cpp when not building validation targets
+if(NOT SRRHI_BUILD_VALIDATION_TARGETS)
+    list(FILTER SOURCES EXCLUDE REGEX "reflection_test\.cpp$")
+endif()
 
 add_executable(${PROJECT_NAME} ${SOURCES})
 
 target_include_directories(${PROJECT_NAME} PRIVATE "${DXC_INSTALL_DIR}/inc")
 target_link_libraries(${PROJECT_NAME} PRIVATE "${DXC_INSTALL_DIR}/lib/x64/dxcompiler.lib" "${DXC_INSTALL_DIR}/lib/x64/dxil.lib")
 
+# Propagate the option as a preprocessor macro so main.cpp can conditionally compile reflection test calls
+if(SRRHI_BUILD_VALIDATION_TARGETS)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE SRRHI_BUILD_VALIDATION_TARGETS)
+endif()
 # ============================================================================
 # Validation executables: each generated header gets its own validation binary
 # Checks for C++ compilation errors and validates struct layouts per header

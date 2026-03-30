@@ -19,7 +19,9 @@ std::string GenerateHlsl(const ParseResult& pr, const std::vector<LayoutMember>&
 std::string GenerateCpp(const ParseResult& pr, const std::vector<LayoutMember>& layouts, int& padCount, bool bEmitValidation);
 std::string VisualizeLayouts(const std::vector<LayoutMember>& layouts);
 std::string VisualizeLayoutsMachineReadable(const std::vector<LayoutMember>& layouts);
+#ifdef SRRHI_BUILD_VALIDATION_TARGETS
 int RunReflectionTests(const fs::path& testInputDir);
+#endif
 
 // ---------------------------------------------------------------------------
 // Global flags
@@ -61,6 +63,7 @@ static void WriteFile(const fs::path& path, const std::string& content)
         throw std::runtime_error("Close error for file: " + path.string());
 }
 
+#ifdef SRRHI_BUILD_VALIDATION_TARGETS
 // ---------------------------------------------------------------------------
 // Generate minimal validation .cpp stubs for each generated .h file.
 // Each stub simply includes the header and compiles it.  All static_assert
@@ -160,6 +163,7 @@ static int GenerateValidationStubs(const fs::path& headerDir)
     LogMsg("[srrhi] Generated %d validation stub(s).\n", count);
     return 0;
 }
+#endif // SRRHI_BUILD_VALIDATION_TARGETS
 
 // ---------------------------------------------------------------------------
 // Derive HLSL include-guard name from the output stem.
@@ -409,8 +413,10 @@ int main(int argc, char* argv[])
     // --- Parse arguments ---
     std::string inputDir;
     std::string outputDir;
+#ifdef SRRHI_BUILD_VALIDATION_TARGETS
     bool runTests        = false;
     bool genValidation   = false;
+#endif
 
     for (int i = 1; i < argc; ++i)
     {
@@ -430,6 +436,7 @@ int main(int argc, char* argv[])
             g_Verbose = true;
             LogMsg("[srrhi] Arg %s: verbose mode enabled\n", arg.c_str());
         }
+#ifdef SRRHI_BUILD_VALIDATION_TARGETS
         else if (arg == "--test")
         {
             runTests = true;
@@ -441,6 +448,7 @@ int main(int argc, char* argv[])
             genValidation = true;
             LogMsg("[srrhi] Arg --gen-validation: validation stub generation enabled\n");
         }
+#endif
         else if (arg == "--help" || arg == "-h")
         {
             LogMsg("Usage: srrhi -i <input-dir> -o <output-dir> [-v] [--test [--gen-validation]]\n"
@@ -457,10 +465,12 @@ int main(int argc, char* argv[])
         }
     }
 
+#ifdef SRRHI_BUILD_VALIDATION_TARGETS
     if (genValidation && !runTests)
     {
         LogMsg("[srrhi] WARNING: --gen-validation has no effect without --test.\n");
     }
+#endif
 
     if (inputDir.empty())
     {
@@ -536,7 +546,13 @@ int main(int argc, char* argv[])
     {
         try
         {
-            ProcessFile(f, inputRoot, outputRoot, globalPadCount, runTests, currentExe);
+            ProcessFile(f, inputRoot, outputRoot, globalPadCount,
+#ifdef SRRHI_BUILD_VALIDATION_TARGETS
+                        runTests,
+#else
+                        false,
+#endif
+                        currentExe);
         }
         catch (const std::exception& e)
         {
@@ -557,6 +573,7 @@ int main(int argc, char* argv[])
     else
         LogMsg("\n[srrhi] Done with errors (exit code %d).\n", exitCode);
 
+#ifdef SRRHI_BUILD_VALIDATION_TARGETS
     if (runTests)
     {
         // --gen-validation: generate validation .cpp stubs for each produced .h
@@ -594,6 +611,7 @@ int main(int argc, char* argv[])
         // not constitute a "test failure" in their own right.
         return testResult;
     }
+#endif
 
     return exitCode;
 }
