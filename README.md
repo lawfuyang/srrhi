@@ -218,10 +218,12 @@ Each `.sr` file produces a C++ header inside `srrhi` namespace containing:
         - **Texture UAVs** (non-array): `void SetFoo(void*, int32_t baseMipLevel)` — `numMipLevels` is hardcoded to `1`.
         - **Texture UAVs** (array): `void SetFoo(void*, int32_t baseMipLevel, int32_t baseSlice, int32_t numSlices)` — `numMipLevels` is hardcoded to `1`.
 
-- **Extern-type validation checks** — when `extern` types are used, generated headers emit compile-time checks requiring:
+- **Extern-type validation checks** — when `extern` types are used **inside `cbuffer` definitions** (directly or transitively through nested structs), generated headers emit compile-time checks requiring:
     - `sizeof(T) % 16 == 0`
     - `alignof(T) >= 16`
     - `std::is_trivially_copyable_v<T>`
+
+  Extern types used **only** as `StructuredBuffer<T>` / `RWStructuredBuffer<T>` template arguments are exempt — no static_asserts are generated for them, since structured buffers have no cbuffer packing constraints.
 
 - **`static_assert` register checks** — file-scope assertions that verify all `NumCBuffers`, `NumSRVs`, `NumUAVs`, `NumSamplers`, `NumResources`, and every `*RegisterIndex` constant at compile time.
 
@@ -847,10 +849,12 @@ struct alignas(16) IndirectInstanceDesc
 #include "generated/cpp/frame_pass.h"
 ```
 
-Generated headers perform `static_assert` checks to enforce cbuffer packing assumptions for extern types:
+Generated headers perform `static_assert` checks to enforce cbuffer packing assumptions, but **only for extern types that are actually used inside a `cbuffer` definition** (directly as a field, or transitively through a nested struct):
 - `sizeof(T) % 16 == 0`
 - `alignof(T) >= 16`
 - `std::is_trivially_copyable_v<T>`
+
+Extern types used **only** as `StructuredBuffer<T>` / `RWStructuredBuffer<T>` template arguments are **exempt** — no static_asserts are generated for them. Structured buffers have no cbuffer packing constraints, so the 16-byte size/alignment/trivially-copyable requirements do not apply.
 
 When `--gen-validation` is used, the generated `validation_<name>.cpp` stub emits stub struct definitions inside the correct namespace blocks for qualified names, so the stub compiles without requiring the real type headers.
 

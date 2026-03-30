@@ -710,6 +710,55 @@ static void EmitStructCpp(std::ostringstream& out, const StructType& st,
 }
 
 // ---------------------------------------------------------------------------
+// Collect the names of all extern types that appear (directly or transitively
+// through nested structs) as fields in any cbuffer struct definition.
+// Extern types used only as StructuredBuffer/RWStructuredBuffer template args
+// do NOT appear here and therefore do not need size/alignment/trivially-copyable
+// static_asserts.
+// ---------------------------------------------------------------------------
+static void CollectExternTypesInTypeRef(
+    const TypeRef& type,
+    const ParseResult& pr,
+    std::unordered_set<std::string>& visited,   // visited StructType* names (cycle guard)
+    std::unordered_set<std::string>& outExterns)
+{
+    if (auto* ext = std::get_if<ExternType>(&type))
+    {
+        outExterns.insert(ext->m_Name);
+        return;
+    }
+    if (auto* ap = std::get_if<std::shared_ptr<ArrayNode>>(&type))
+    {
+        CollectExternTypesInTypeRef((*ap)->m_ElementType, pr, visited, outExterns);
+        return;
+    }
+    if (auto* sp = std::get_if<StructType*>(&type))
+    {
+        const StructType* st = *sp;
+        if (!st || visited.count(st->m_Name)) return;
+        visited.insert(st->m_Name);
+        for (const auto& mv : st->m_Members)
+            CollectExternTypesInTypeRef(mv.m_Type, pr, visited, outExterns);
+        visited.erase(st->m_Name);
+    }
+}
+
+static std::unordered_set<std::string> CollectExternTypesUsedInCBuffers(
+    const ParseResult& pr)
+{
+    std::unordered_set<std::string> result;
+    for (const auto& bufDef : pr.m_BufferDefs)
+    {
+        for (const auto& mv : bufDef.m_Members)
+        {
+            std::unordered_set<std::string> visited;
+            CollectExternTypesInTypeRef(mv.m_Type, pr, visited, result);
+        }
+    }
+    return result;
+}
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 std::string GenerateCpp(const ParseResult& pr,
@@ -737,9 +786,15 @@ std::string GenerateCpp(const ParseResult& pr,
     if (!pr.m_SrInputDefs.empty())
         out << "#include <cstring>\n";
 
+    // Collect extern types that are actually used in cbuffers — only those need
+    // size/alignment/trivially-copyable static_asserts.  Extern types used solely
+    // as StructuredBuffer/RWStructuredBuffer template args are excluded.
+    const std::unordered_set<std::string> externTypesInCBuffers =
+        CollectExternTypesUsedInCBuffers(pr);
+
     // Include <type_traits> for the static_assert on std::is_trivially_copyable_v
-    // emitted for each extern type.
-    if (!pr.m_ExternTypeNames.empty())
+    // emitted for cbuffer-used extern types.
+    if (!externTypesInCBuffers.empty())
         out << "#include <type_traits>\n";
 
     // Include srrhi.h for ResourceEntry and ResourceType (resource binding API).
@@ -776,21 +831,25 @@ std::string GenerateCpp(const ParseResult& pr,
 
     out << "\n";
 
-    // Emit static_asserts and a usage note for any 'extern'-declared types.
+    // Emit static_asserts for extern types that are used in cbuffers.
     // These run at the user's compile time to validate the 16-byte assumptions
     // that srrhi makes about extern types' size and alignment.
-    if (!pr.m_ExternTypeNames.empty())
+    // Extern types used only in StructuredBuffer/RWStructuredBuffer do NOT need
+    // these constraints and are therefore excluded.
+    if (!externTypesInCBuffers.empty())
     {
         out << "// ---------------------------------------------------------------------------\n";
-        out << "// Extern type constraints\n";
+        out << "// Extern type constraints (cbuffer-used types only)\n";
         out << "//\n";
-        out << "// The following types were declared 'extern' in the .sr source.  srrhi does\n";
-        out << "// not define them; they must be defined externally by the user.  srrhi makes\n";
-        out << "// three assumptions about each extern type for correct HLSL cbuffer packing\n";
-        out << "// and safe CPU-side upload:\n";
+        out << "// The following types were declared 'extern' in the .sr source and are used\n";
+        out << "// inside cbuffer definitions.  srrhi makes three assumptions about each such\n";
+        out << "// type for correct HLSL cbuffer packing and safe CPU-side upload:\n";
         out << "//   1. sizeof(T) % 16 == 0           -- size is a multiple of 16 (one HLSL register)\n";
         out << "//   2. alignof(T) >= 16               -- at least 16-byte aligned (cbuffer slot boundary)\n";
         out << "//   3. std::is_trivially_copyable_v<T> -- safe to memcpy into the cbuffer upload buffer\n";
+        out << "//\n";
+        out << "// Extern types used only in StructuredBuffer/RWStructuredBuffer are exempt\n";
+        out << "// from these constraints and have no static_asserts generated.\n";
         out << "//\n";
         out << "// The static_asserts below verify these assumptions at compile time.\n";
         out << "// If an assert fires, adjust the extern type to satisfy the constraint.\n";
@@ -799,7 +858,7 @@ std::string GenerateCpp(const ParseResult& pr,
         out << "//   Either #include the header(s) that define these types before this file,\n";
         out << "//   or define them directly above the #include of this generated header.\n";
         out << "// ---------------------------------------------------------------------------\n";
-        for (const auto& extName : pr.m_ExternTypeNames)
+        for (const auto& extName : externTypesInCBuffers)
         {
             out << "static_assert(sizeof(" << extName << ") % 16 == 0,\n";
             out << "    \"srrhi: extern type '" << extName
