@@ -450,7 +450,7 @@ static void EmitMembersCpp(std::ostringstream& out,
         if (auto* ext = std::get_if<ExternType>(&mv.m_Type))
         {
             // Extern type: emit the field using the external type name directly (no srrhi:: prefix).
-            // srrhi assumes sizeof(T) % 16 == 0 and alignof(T) >= 16 for cbuffer packing;
+            // srrhi assumes sizeof(T) % 16 == 0 for cbuffer packing and uses std::memcpy for upload;
             // the static_asserts at the top of this header enforce those constraints.
             // Cursor is not advanced because sizeof is unknown to the layout engine.
             out << ind << ext->m_Name << " " << fieldName << ";\n";
@@ -842,11 +842,14 @@ std::string GenerateCpp(const ParseResult& pr,
         out << "// Extern type constraints (cbuffer-used types only)\n";
         out << "//\n";
         out << "// The following types were declared 'extern' in the .sr source and are used\n";
-        out << "// inside cbuffer definitions.  srrhi makes three assumptions about each such\n";
+        out << "// inside cbuffer definitions.  srrhi makes two assumptions about each such\n";
         out << "// type for correct HLSL cbuffer packing and safe CPU-side upload:\n";
         out << "//   1. sizeof(T) % 16 == 0           -- size is a multiple of 16 (one HLSL register)\n";
-        out << "//   2. alignof(T) >= 16               -- at least 16-byte aligned (cbuffer slot boundary)\n";
-        out << "//   3. std::is_trivially_copyable_v<T> -- safe to memcpy into the cbuffer upload buffer\n";
+        out << "//   2. std::is_trivially_copyable_v<T> -- safe to memcpy into the cbuffer upload buffer\n";
+        out << "//\n";
+        out << "// Note: alignof(T) >= 16 is NOT required because srrhi uses std::memcpy to\n";
+        out << "// copy extern types into the cbuffer upload buffer, so the source alignment\n";
+        out << "// of the extern type does not matter.\n";
         out << "//\n";
         out << "// Extern types used only in StructuredBuffer/RWStructuredBuffer are exempt\n";
         out << "// from these constraints and have no static_asserts generated.\n";
@@ -863,9 +866,6 @@ std::string GenerateCpp(const ParseResult& pr,
             out << "static_assert(sizeof(" << extName << ") % 16 == 0,\n";
             out << "    \"srrhi: extern type '" << extName
                 << "' must have sizeof divisible by 16 (HLSL cbuffer packing)\");\n";
-            out << "static_assert(alignof(" << extName << ") >= 16,\n";
-            out << "    \"srrhi: extern type '" << extName
-                << "' must be at least 16-byte aligned (HLSL cbuffer packing)\");\n";
             out << "static_assert(std::is_trivially_copyable_v<" << extName << ">,\n";
             out << "    \"srrhi: extern type '" << extName
                 << "' must be trivially copyable (memcpy-safe for cbuffer upload)\");\n";
