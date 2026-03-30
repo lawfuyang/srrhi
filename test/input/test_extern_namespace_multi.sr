@@ -1,0 +1,20 @@
+// test_extern_namespace_multi.sr
+// Tests multiple namespace-qualified extern declarations in the same file,
+// including a mix of simple and qualified names.
+
+extern MySimpleExtern;
+extern nvrhi::rt::IndirectInstanceDesc;
+extern engine::render::LightData;
+
+struct SceneData
+{
+    MySimpleExtern                  m_Simple;
+    nvrhi::rt::IndirectInstanceDesc m_Instance;
+    engine::render::LightData       m_Light;
+};
+
+srinput SceneInputs
+{
+    StructuredBuffer<nvrhi::rt::IndirectInstanceDesc> m_Instances;
+    StructuredBuffer<engine::render::LightData>       m_Lights;
+};

@@ -1,0 +1,9 @@
+// test_extern_namespace_resource_undeclared.sr
+// Error: using a namespace-qualified type as StructuredBuffer template arg
+// without declaring it with 'extern'.
+// Expected failure: resource template argument is not a defined struct or extern type.
+
+srinput MyInputs
+{
+    StructuredBuffer<nvrhi::rt::IndirectInstanceDesc> m_Instances;  // not declared with extern
+};

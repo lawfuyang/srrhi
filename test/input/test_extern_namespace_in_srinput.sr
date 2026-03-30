@@ -1,0 +1,9 @@
+// test_extern_namespace_in_srinput.sr
+// Tests 'extern' namespace-qualified declaration inside an srinput body.
+
+srinput RayTracingInputs
+{
+    extern nvrhi::rt::IndirectInstanceDesc;
+
+    StructuredBuffer<nvrhi::rt::IndirectInstanceDesc> m_Instances;
+};

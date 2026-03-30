@@ -1,0 +1,16 @@
+// test_extern_namespace_deep.sr
+// Tests 'extern' declaration with a multi-level namespace qualifier.
+// e.g. extern nvrhi::rt::IndirectInstanceDesc;
+
+extern nvrhi::rt::IndirectInstanceDesc;
+
+struct RayTracingData
+{
+    nvrhi::rt::IndirectInstanceDesc m_Instance;
+    float4                          m_Color;
+};
+
+srinput RayTracingInputs
+{
+    StructuredBuffer<nvrhi::rt::IndirectInstanceDesc> m_Instances;
+};

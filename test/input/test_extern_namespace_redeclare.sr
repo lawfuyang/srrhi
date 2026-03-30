@@ -1,0 +1,13 @@
+// test_extern_namespace_redeclare.sr
+// Tests that re-declaring the same namespace-qualified extern type is idempotent.
+
+extern nvrhi::rt::IndirectInstanceDesc;
+extern nvrhi::rt::IndirectInstanceDesc;  // re-declaration: should be valid (idempotent)
+
+struct UseExtern
+{
+    extern nvrhi::rt::IndirectInstanceDesc;  // re-declaration inside struct: also valid
+
+    nvrhi::rt::IndirectInstanceDesc m_Instance;
+    float                           m_Value;
+};

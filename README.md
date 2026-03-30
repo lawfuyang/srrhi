@@ -43,20 +43,33 @@ srinput ForwardPass
 
 **`extern TypeName;`** — declare externally-defined user types that are not defined in any `.sr` file. These can be used in structs, cbuffers, and resource template arguments (for structured buffers).
 
+Both simple names and **namespace/nested-class qualified names** (using `::`) are supported:
+
 ```hlsl
-extern GPUSceneBlock;
+extern GPUSceneBlock;                        // simple name
+extern nvrhi::rt::IndirectInstanceDesc;      // namespace-qualified name
+extern engine::render::LightData;            // multi-level namespace
 
 cbuffer FrameData
 {
     GPUSceneBlock scene;
 };
 
+struct RayTracingData
+{
+    nvrhi::rt::IndirectInstanceDesc m_Instance;
+    float4                          m_Color;
+};
+
 srinput FramePass
 {
-    StructuredBuffer<GPUSceneBlock> m_SceneHistory;
+    StructuredBuffer<GPUSceneBlock>                   m_SceneHistory;
+    StructuredBuffer<nvrhi::rt::IndirectInstanceDesc> m_Instances;
     FrameData m_Frame;
 };
 ```
+
+`extern` declarations are idempotent — re-declaring the same type (at global scope, inside a `struct`, or inside an `srinput`) is allowed and has no effect. For qualified names, the conflict checks against native types, local structs, type aliases, and srinput names are skipped, since namespaced types cannot collide with local names.
 
 **Type aliases** — aliases are supported via all three forms: `typedef`, `using`, and `#define` type aliases.
 
@@ -813,7 +826,7 @@ Register layout for `CombinedPass`:
 
 ### Extern Types in Generated C++
 
-When `.sr` uses `extern TypeName;`, generated C++ headers expect the type to be visible before including the generated header.
+When `.sr` uses `extern TypeName;` or `extern ns::TypeName;`, generated C++ headers expect the type to be visible before including the generated header.
 
 ```cpp
 // project_types.h
@@ -822,12 +835,24 @@ struct alignas(16) GPUSceneBlock
     float data[16];
 };
 
+namespace nvrhi { namespace rt {
+struct alignas(16) IndirectInstanceDesc
+{
+    // ... real definition ...
+};
+} }
+
 // render.cpp
 #include "project_types.h"
 #include "generated/cpp/frame_pass.h"
 ```
 
-Generated headers perform static_assert checks to enforce cbuffer packing assumptions for extern types.
+Generated headers perform `static_assert` checks to enforce cbuffer packing assumptions for extern types:
+- `sizeof(T) % 16 == 0`
+- `alignof(T) >= 16`
+- `std::is_trivially_copyable_v<T>`
+
+When `--gen-validation` is used, the generated `validation_<name>.cpp` stub emits stub struct definitions inside the correct namespace blocks for qualified names, so the stub compiles without requiring the real type headers.
 
 ### Preprocessor and Alias Patterns
 

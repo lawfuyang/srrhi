@@ -1,0 +1,5 @@
+// test_extern_namespace_missing_ident.sr
+// Error: 'extern ns::' with nothing after the '::' is a parse error.
+// Expected failure: malformed qualified name.
+
+extern nvrhi::;

@@ -1,0 +1,9 @@
+// test_extern_namespace_undefined_usage.sr
+// Error: using a namespace-qualified type that was never declared with 'extern'.
+// Expected failure: unrecognized type 'nvrhi::rt::IndirectInstanceDesc'.
+
+struct MyStruct
+{
+    nvrhi::rt::IndirectInstanceDesc m_Instance;  // not declared with extern
+    float                           m_Value;
+};

@@ -121,6 +121,10 @@ static const std::unordered_set<std::string> k_ExpectedFailStems = {
     "test_extern_known_struct",
     "test_extern_type_alias",
     "test_extern_undefined_usage",
+    // Namespace-qualified extern type error tests
+    "test_extern_namespace_missing_ident",
+    "test_extern_namespace_undefined_usage",
+    "test_extern_namespace_resource_undeclared",
 };
 
 // ---------------------------------------------------------------------------

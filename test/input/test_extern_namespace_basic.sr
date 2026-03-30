@@ -1,0 +1,16 @@
+// test_extern_namespace_basic.sr
+// Tests 'extern' declaration with a single-level namespace qualifier.
+// e.g. extern nvrhi::IndirectInstanceDesc;
+
+extern nvrhi::IndirectInstanceDesc;
+
+struct MyStruct
+{
+    nvrhi::IndirectInstanceDesc m_Desc;
+    float                       m_Value;
+};
+
+srinput MyPassInputs
+{
+    StructuredBuffer<nvrhi::IndirectInstanceDesc> m_InstanceBuffer;
+};

@@ -1,0 +1,15 @@
+// test_extern_namespace_cbuffer.sr
+// Tests 'extern' namespace-qualified type used directly inside a cbuffer.
+
+extern engine::GpuMaterial;
+
+cbuffer MaterialCBuffer
+{
+    engine::GpuMaterial m_Material;
+    float4              m_Tint;
+};
+
+srinput MaterialInputs
+{
+    MaterialCBuffer m_materialCb;
+};

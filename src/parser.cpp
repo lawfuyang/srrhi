@@ -357,6 +357,8 @@ struct Parser
     // -----------------------------------------------------------------------
     // Handle 'extern TypeName;' declaration (at global, struct, or srinput scope).
     // m_Cur is positioned on the type-name token after 'extern'.
+    // Supports simple names ("MyType") and namespace/nested-class qualified names
+    // ("nvrhi::rt::IndirectInstanceDesc").  The full qualified name is stored as-is.
     // Registers the type name in m_ExternMap and m_Result.m_ExternTypeNames.
     // -----------------------------------------------------------------------
     void HandleExternDecl(int externLine)
@@ -365,30 +367,56 @@ struct Parser
             throw std::runtime_error(m_FilePath + ":" + std::to_string(externLine) +
                                      ": expected type name after 'extern'");
 
+        // Collect the (possibly qualified) type name: Ident (:: Ident)*
         std::string typeName = m_Cur.m_Text;
         int nameLine = m_Cur.m_Line;
-        Advance(); // consume the type name
+        Advance(); // consume first identifier
 
-        // Block native/builtin types
-        if (IsNativeTypeName(typeName))
-            throw std::runtime_error(m_FilePath + ":" + std::to_string(nameLine) +
-                                     ": 'extern' cannot be used with native type '" + typeName +
-                                     "'; only externally-defined user types may be declared extern");
+        while (m_Cur.m_Kind == TokKind::Colon)
+        {
+            // Peek ahead: we need exactly "::" (two consecutive Colon tokens)
+            int colonLine = m_Cur.m_Line;
+            Advance(); // consume first ':'
+            if (m_Cur.m_Kind != TokKind::Colon || m_Cur.m_Line != colonLine)
+                throw std::runtime_error(m_FilePath + ":" + std::to_string(colonLine) +
+                                         ": expected '::' in qualified type name after '" + typeName + "'");
+            Advance(); // consume second ':'
 
-        // Block already-defined struct names
-        if (m_StructMap.count(typeName))
-            throw std::runtime_error(m_FilePath + ":" + std::to_string(nameLine) +
-                                     ": 'extern " + typeName + "' conflicts with an already-defined struct");
+            if (m_Cur.m_Kind != TokKind::Ident)
+                throw std::runtime_error(m_FilePath + ":" + std::to_string(m_Cur.m_Line) +
+                                         ": expected identifier after '::' in qualified type name");
+            typeName += "::" + m_Cur.m_Text;
+            Advance(); // consume next identifier component
+        }
 
-        // Block type aliases (typedef / using / #define)
-        if (m_TypeAliases.count(typeName))
-            throw std::runtime_error(m_FilePath + ":" + std::to_string(nameLine) +
-                                     ": 'extern " + typeName + "' conflicts with an existing type alias");
+        // For qualified names (containing "::"), skip the simple-name conflict checks —
+        // namespaced types cannot conflict with local struct/alias/srinput names.
+        // For simple (unqualified) names, apply all the usual validation rules.
+        bool bIsQualified = (typeName.find("::") != std::string::npos);
 
-        // Block srinput names
-        if (m_SrInputMap.count(typeName))
-            throw std::runtime_error(m_FilePath + ":" + std::to_string(nameLine) +
-                                     ": 'extern " + typeName + "' conflicts with an srinput name");
+        if (!bIsQualified)
+        {
+            // Block native/builtin types
+            if (IsNativeTypeName(typeName))
+                throw std::runtime_error(m_FilePath + ":" + std::to_string(nameLine) +
+                                         ": 'extern' cannot be used with native type '" + typeName +
+                                         "'; only externally-defined user types may be declared extern");
+
+            // Block already-defined struct names
+            if (m_StructMap.count(typeName))
+                throw std::runtime_error(m_FilePath + ":" + std::to_string(nameLine) +
+                                         ": 'extern " + typeName + "' conflicts with an already-defined struct");
+
+            // Block type aliases (typedef / using / #define)
+            if (m_TypeAliases.count(typeName))
+                throw std::runtime_error(m_FilePath + ":" + std::to_string(nameLine) +
+                                         ": 'extern " + typeName + "' conflicts with an existing type alias");
+
+            // Block srinput names
+            if (m_SrInputMap.count(typeName))
+                throw std::runtime_error(m_FilePath + ":" + std::to_string(nameLine) +
+                                         ": 'extern " + typeName + "' conflicts with an srinput name");
+        }
 
         Expect(TokKind::Semicolon, ";");
 
@@ -1003,6 +1031,62 @@ struct Parser
             break;
         }
 
+        // Accumulate optional namespace/class qualifiers: Ident (:: Ident)*
+        // This allows qualified extern types like "nvrhi::rt::IndirectInstanceDesc".
+        // We only consume "::" tokens when the resulting qualified name is in m_ExternMap,
+        // so we use a speculative approach: peek ahead and build the full name first.
+        {
+            // Save lexer state so we can backtrack if the qualified name is not an extern type.
+            size_t savedPos  = m_Lex.m_Pos;
+            int    savedLine = m_Lex.m_Line;
+            Token  savedCur  = m_Cur;
+
+            std::string qualName = name;
+            bool bBuiltQualified = false;
+
+            while (m_Cur.m_Kind == TokKind::Colon)
+            {
+                int colonLine = m_Cur.m_Line;
+                // Save state before consuming the first ':'
+                size_t sp2 = m_Lex.m_Pos; int sl2 = m_Lex.m_Line; Token sc2 = m_Cur;
+                Advance(); // consume first ':'
+                if (m_Cur.m_Kind != TokKind::Colon || m_Cur.m_Line != colonLine)
+                {
+                    // Not "::" — restore and stop
+                    m_Lex.m_Pos = sp2; m_Lex.m_Line = sl2; m_Cur = sc2;
+                    break;
+                }
+                Advance(); // consume second ':'
+                if (m_Cur.m_Kind != TokKind::Ident)
+                {
+                    // Malformed qualified name — restore and stop
+                    m_Lex.m_Pos = sp2; m_Lex.m_Line = sl2; m_Cur = sc2;
+                    break;
+                }
+                qualName += "::" + m_Cur.m_Text;
+                Advance();
+                bBuiltQualified = true;
+            }
+
+            if (bBuiltQualified)
+            {
+                // Check if the fully-qualified name is a declared extern type.
+                if (m_ExternMap.count(qualName))
+                {
+                    if (bIsRowMajor)
+                        throw std::runtime_error(m_FilePath + ":" + std::to_string(nameLine) +
+                                                 ": row_major/column_major qualifier cannot be applied"
+                                                 " to extern type '" + qualName + "'");
+                    ExternType ext;
+                    ext.m_Name = qualName;
+                    return ext;
+                }
+                // Qualified name not found — restore to just after the first identifier
+                // so the simple-name lookups below can still run.
+                m_Lex.m_Pos = savedPos; m_Lex.m_Line = savedLine; m_Cur = savedCur;
+            }
+        }
+
         // Named struct reference
         auto structIt = m_StructMap.find(name);
         if (structIt != m_StructMap.end())
@@ -1020,7 +1104,7 @@ struct Parser
             return aliasIt->second;
         }
 
-        // Externally-defined type declared with 'extern TypeName;'
+        // Externally-defined type declared with 'extern TypeName;' (simple unqualified name)
         if (m_ExternMap.count(name))
         {
             if (bIsRowMajor)
@@ -1895,6 +1979,7 @@ struct Parser
                         {
                             // Parse <templateArg> — may be a builtin type, struct name, type alias,
                             // or an externally-defined macro name (validated by DXC, not by the parser).
+                            // Also supports namespace/class qualified names like "nvrhi::rt::Foo".
                             Advance(); // consume '<'
                             if (m_Cur.m_Kind != TokKind::Ident)
                                 throw std::runtime_error(m_FilePath + ":" + std::to_string(m_Cur.m_Line) +
@@ -1902,6 +1987,29 @@ struct Parser
                             Token argTok = m_Cur; Advance();
                             originalTemplateArg = argTok.m_Text; // preserve raw name before alias resolution
                             templateArg         = argTok.m_Text;
+
+                            // Accumulate optional namespace/class qualifiers: Ident (:: Ident)*
+                            // This allows qualified extern types like "nvrhi::rt::IndirectInstanceDesc".
+                            while (m_Cur.m_Kind == TokKind::Colon)
+                            {
+                                int colonLine = m_Cur.m_Line;
+                                size_t sp2 = m_Lex.m_Pos; int sl2 = m_Lex.m_Line; Token sc2 = m_Cur;
+                                Advance(); // consume first ':'
+                                if (m_Cur.m_Kind != TokKind::Colon || m_Cur.m_Line != colonLine)
+                                {
+                                    m_Lex.m_Pos = sp2; m_Lex.m_Line = sl2; m_Cur = sc2;
+                                    break;
+                                }
+                                Advance(); // consume second ':'
+                                if (m_Cur.m_Kind != TokKind::Ident)
+                                {
+                                    m_Lex.m_Pos = sp2; m_Lex.m_Line = sl2; m_Cur = sc2;
+                                    break;
+                                }
+                                templateArg         += "::" + m_Cur.m_Text;
+                                originalTemplateArg += "::" + m_Cur.m_Text;
+                                Advance();
+                            }
 
                             // Resolve type alias if the token is a known macro / typedef / using.
                             auto aliasIt = m_TypeAliases.find(templateArg);
@@ -1928,7 +2036,7 @@ struct Parser
                                         // Struct-typed resources must reference a visible struct definition
                                         // or a declared extern type.
                                         throw std::runtime_error(m_FilePath + ":" + std::to_string(argTok.m_Line) +
-                                                                 ": resource template argument '" + argTok.m_Text +
+                                                                 ": resource template argument '" + originalTemplateArg +
                                                                  "' is not a defined struct or extern type");
                                     }
                                     // extern type used as StructuredBuffer template arg — valid

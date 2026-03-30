@@ -134,11 +134,49 @@ static int GenerateValidationStubs(const fs::path& headerDir)
         // These stubs must satisfy the static_asserts emitted in the generated header:
         //   sizeof(T) % 16 == 0  and  alignof(T) >= 16
         // An alignas(16) struct with a 16-byte pad member fulfils both constraints.
+        //
+        // For qualified names like "nvrhi::rt::IndirectInstanceDesc", we emit the
+        // struct inside the appropriate nested namespace blocks.
         if (!externTypes.empty())
         {
             code << "// Stub definitions for extern types (compilation testing only — not the real types)\n";
             for (const auto& typeName : externTypes)
-                code << "struct alignas(16) " << typeName << " { uint8_t _srrhi_stub_pad[16]; };\n";
+            {
+                // Split on "::" to detect qualified names
+                std::vector<std::string> parts;
+                {
+                    std::string s = typeName;
+                    size_t pos = 0;
+                    while (true)
+                    {
+                        size_t found = s.find("::", pos);
+                        if (found == std::string::npos)
+                        {
+                            parts.push_back(s.substr(pos));
+                            break;
+                        }
+                        parts.push_back(s.substr(pos, found - pos));
+                        pos = found + 2;
+                    }
+                }
+
+                if (parts.size() == 1)
+                {
+                    // Simple unqualified name
+                    code << "struct alignas(16) " << typeName << " { uint8_t _srrhi_stub_pad[16]; };\n";
+                }
+                else
+                {
+                    // Qualified name: wrap in namespace blocks
+                    // e.g. "nvrhi::rt::Foo" → namespace nvrhi { namespace rt { struct alignas(16) Foo {...}; } }
+                    for (size_t pi = 0; pi + 1 < parts.size(); ++pi)
+                        code << "namespace " << parts[pi] << " { ";
+                    code << "struct alignas(16) " << parts.back() << " { uint8_t _srrhi_stub_pad[16]; };";
+                    for (size_t pi = 0; pi + 1 < parts.size(); ++pi)
+                        code << " }";
+                    code << "\n";
+                }
+            }
             code << "\n";
         }
 
