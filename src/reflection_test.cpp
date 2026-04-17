@@ -243,36 +243,35 @@ static std::string BuildDummyEntryPoint(
         {
             std::string fieldAccess = varPrefix + "." + m.m_Name;
 
-            if (std::holds_alternative<BuiltinType>(m.m_Type))
+            if (m.m_Type && m.m_Type->IsBuiltin())
             {
-                const auto& bt = std::get<BuiltinType>(m.m_Type);
-                if (bt.m_VectorSize == 1)
+                if (m.m_Type->VectorSize() == 1)
                     body << "    _srrhi_check ^= asuint((float)" << fieldAccess << ");\n";
                 else
                     body << "    _srrhi_check ^= asuint(" << fieldAccess << ".x);\n";
                 break;
             }
-            if (auto* ap = std::get_if<std::shared_ptr<ArrayNode>>(&m.m_Type))
+            if (m.m_Type && m.m_Type->IsArray())
             {
-                const ArrayNode& arr = **ap;
-                if (auto* bt = std::get_if<BuiltinType>(&arr.m_ElementType))
+                const auto& elemType = m.m_Type->ElementType();
+                if (elemType && elemType->IsBuiltin())
                 {
-                    if (bt->m_VectorSize == 1)
+                    if (elemType->VectorSize() == 1)
                         body << "    _srrhi_check ^= asuint((float)" << fieldAccess << "[0]);\n";
                     else
                         body << "    _srrhi_check ^= asuint(" << fieldAccess << "[0].x);\n";
                     break;
                 }
                 // array of struct — try first member of struct
-                if (auto* sp = std::get_if<StructType*>(&arr.m_ElementType))
+                if (elemType && elemType->IsStruct())
                 {
-                    const StructType* st = *sp;
-                    if (!st->m_Members.empty())
+                    const auto* members = elemType->Members();
+                    if (members && !members->empty())
                     {
-                        const auto& firstField = st->m_Members[0];
-                        if (auto* bt2 = std::get_if<BuiltinType>(&firstField.m_Type))
+                        const auto& firstField = (*members)[0];
+                        if (firstField.m_Type && firstField.m_Type->IsBuiltin())
                         {
-                            if (bt2->m_VectorSize == 1)
+                            if (firstField.m_Type->VectorSize() == 1)
                                 body << "    _srrhi_check ^= asuint((float)" << fieldAccess << "[0]." << firstField.m_Name << ");\n";
                             else
                                 body << "    _srrhi_check ^= asuint(" << fieldAccess << "[0]." << firstField.m_Name << ".x);\n";
@@ -282,12 +281,12 @@ static std::string BuildDummyEntryPoint(
                 }
                 break;
             }
-            if (auto* sp = std::get_if<StructType*>(&m.m_Type))
+            if (m.m_Type && m.m_Type->IsStruct())
             {
-                const StructType* st = *sp;
-                if (!st->m_Members.empty())
+                const auto* members = m.m_Type->Members();
+                if (members && !members->empty())
                 {
-                    const auto& firstField = st->m_Members[0];
+                    const auto& firstField = (*members)[0];
                     body << "    _srrhi_check ^= asuint((float)" << fieldAccess << "." << firstField.m_Name << ");\n";
                 }
                 break;

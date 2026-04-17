@@ -105,7 +105,7 @@ static bool IsArrayTextureKind(ResourceKind kind)
 // ---------------------------------------------------------------------------
 struct CppTypeInfo { std::string m_TypeName; int m_ArrayMult = 0; };
 
-static CppTypeInfo MapBuiltinToCpp(const BuiltinType& bt)
+static CppTypeInfo MapBuiltinToCpp(const BuiltinTypeRef& bt)
 {
     const std::string& sc = bt.m_ScalarName;
     int vs = bt.m_VectorSize;
@@ -147,8 +147,13 @@ static CppTypeInfo MapBuiltinToCpp(const BuiltinType& bt)
     }
 
     // Fallback: scalar array
-    CppTypeInfo base = MapBuiltinToCpp(BuiltinType{bt.m_ScalarName, bt.m_ScalarName,
-                                                    bt.m_ElementSize, bt.m_Alignment, 1});
+    BuiltinTypeRef scalarBt;
+    scalarBt.m_ScalarName  = bt.m_ScalarName;
+    scalarBt.m_Name        = bt.m_ScalarName;
+    scalarBt.m_ElementSize = bt.m_ElementSize;
+    scalarBt.m_Alignment_  = bt.m_ElementSize;
+    scalarBt.m_VectorSize  = 1;
+    CppTypeInfo base = MapBuiltinToCpp(scalarBt);
     base.m_ArrayMult = vs;
     return base;
 }
@@ -159,17 +164,18 @@ static CppTypeInfo MapBuiltinToCpp(const BuiltinType& bt)
 // Params: arr - the array node representing the matrix
 //         computedSize - the size from the layout engine (0 = skip size check for named structs)
 // ---------------------------------------------------------------------------
-static std::string MapMatrixType(const ArrayNode& arr, int computedSize)
+static std::string MapMatrixType(const TypeRef& arr, int computedSize)
 {
     // Check if this is a float4x4 (or similar standard DirectX matrix)
-    if (!arr.m_bCreatedFromMatrix)
+    if (!arr.IsCreatedFromMatrix())
         return "";
 
-    if (auto* elemBt = std::get_if<BuiltinType>(&arr.m_ElementType))
+    const auto& elemType = arr.ElementType();
+    if (elemType && elemType->IsBuiltin())
     {
-        const std::string& sc = elemBt->m_ScalarName;
-        int rows = elemBt->m_VectorSize;      // element type vector size = rows
-        int cols = arr.m_ArraySize;            // array size = columns
+        const std::string& sc = elemType->ScalarName();
+        int rows = elemType->VectorSize();  // element type vector size = rows
+        int cols = arr.ArraySize();          // array size = columns
 
         // Check for float-based matrices
         if ((sc == "float" || sc == "float32_t"))
@@ -227,7 +233,7 @@ static bool StructLayoutHasPadding(const LayoutMember& lm)
         if (sub.m_Padding > 0)
             return true;
         // Recurse into nested structs
-        if (std::holds_alternative<StructType*>(sub.m_Type))
+        if (sub.m_Type && sub.m_Type->IsStruct())
             if (StructLayoutHasPadding(sub))
                 return true;
     }
@@ -239,23 +245,28 @@ static bool StructLayoutHasPadding(const LayoutMember& lm)
 // any ExternType. Extern type sizes are not known at generation time, so they
 // make offsets of following cbuffer members unknown for static_assert checks.
 // ---------------------------------------------------------------------------
-static bool TypeContainsExternImpl(const TypeRef& type,
+static bool TypeContainsExternImpl(const std::shared_ptr<TypeRef>& type,
                                    std::unordered_set<const StructType*>& visiting)
 {
-    if (std::holds_alternative<ExternType>(type))
+    if (!type) return false;
+    if (type->IsExtern())
         return true;
 
-    if (auto* ap = std::get_if<std::shared_ptr<ArrayNode>>(&type))
-        return TypeContainsExternImpl((*ap)->m_ElementType, visiting);
+    if (type->IsArray())
+        return TypeContainsExternImpl(type->ElementType(), visiting);
 
-    if (auto* sp = std::get_if<StructType*>(&type))
+    if (type->IsStruct())
     {
-        const StructType* st = *sp;
+        const auto* members = type->Members();
+        if (!members) return false;
+        // Use StructName to identify the struct for cycle detection
+        // We need the raw pointer for the visited set — use Members() address as proxy
+        const StructType* st = static_cast<const StructTypeRef*>(type.get())->m_Struct;
         if (!st || visiting.count(st) > 0)
             return false;
 
         visiting.insert(st);
-        for (const auto& mv : st->m_Members)
+        for (const auto& mv : *members)
         {
             if (TypeContainsExternImpl(mv.m_Type, visiting))
             {
@@ -269,7 +280,7 @@ static bool TypeContainsExternImpl(const TypeRef& type,
     return false;
 }
 
-static bool TypeContainsExtern(const TypeRef& type)
+static bool TypeContainsExtern(const std::shared_ptr<TypeRef>& type)
 {
     std::unordered_set<const StructType*> visiting;
     return TypeContainsExternImpl(type, visiting);
@@ -302,12 +313,12 @@ static std::vector<SetterInfo> CollectSetterInfos(
         SetterInfo si;
         si.m_CleanedName = CleanMemberName(mv.m_Name);
 
-        if (auto* sp = std::get_if<StructType*>(&mv.m_Type))
+        if (mv.m_Type && mv.m_Type->IsStruct())
         {
             if (!StructLayoutHasPadding(*lm))
             {
                 // No padding: use the typed struct directly (const ref setter)
-                si.m_CppType  = "srrhi::" + (*sp)->m_Name;
+                si.m_CppType  = "srrhi::" + mv.m_Type->StructName();
                 si.m_bByValue = false;
             }
             else
@@ -315,28 +326,24 @@ static std::vector<SetterInfo> CollectSetterInfos(
                 // Padding present: fall back to byte array + memcpy setter
                 si.m_bIsByteArray   = true;
                 si.m_ByteArraySize  = lm->m_Size;
-                si.m_StructTypeName = (*sp)->m_Name;
+                si.m_StructTypeName = mv.m_Type->StructName();
             }
         }
-        else if (auto* ext = std::get_if<ExternType>(&mv.m_Type))
+        else if (mv.m_Type && mv.m_Type->IsExtern())
         {
             // Extern type: assumed trivially copyable and memcpy-safe.
-            // sizeof(T) is not known at generation time, so the setter uses
-            // std::memcpy(&field, &value, sizeof(T)) rather than direct assignment.
-            // std::is_trivially_copyable_v<T> is checked by a static_assert in the header.
-            si.m_CppType          = ext->m_Name;
+            si.m_CppType          = mv.m_Type->DisplayName();
             si.m_bIsExternMemcpy  = true;
         }
-        else if (std::holds_alternative<std::shared_ptr<ArrayNode>>(lm->m_Type))
+        else if (lm->m_Type && lm->m_Type->IsArray())
         {
-            const ArrayNode& arr = *std::get<std::shared_ptr<ArrayNode>>(lm->m_Type);
-            if (arr.m_bCreatedFromMatrix)
+            if (lm->m_Type->IsCreatedFromMatrix())
             {
-                std::string matType = MapMatrixType(arr, lm->m_Size);
+                std::string matType = MapMatrixType(*lm->m_Type, lm->m_Size);
                 if (!matType.empty())
                 {
                     si.m_CppType  = matType;
-                    si.m_bByValue = false; // const ref for DirectX matrix types
+                    si.m_bByValue = false;
                 }
                 else
                 {
@@ -350,9 +357,9 @@ static std::vector<SetterInfo> CollectSetterInfos(
                 si.m_ByteArraySize = lm->m_Size;
             }
         }
-        else if (auto* bt = std::get_if<BuiltinType>(&lm->m_Type))
+        else if (lm->m_Type && lm->m_Type->IsBuiltin())
         {
-            auto cti = MapBuiltinToCpp(*bt);
+            auto cti = MapBuiltinToCpp(static_cast<const BuiltinTypeRef&>(*lm->m_Type));
             if (cti.m_ArrayMult > 0)
             {
                 // Unusual vector fallback → treat as byte array
@@ -365,7 +372,6 @@ static std::vector<SetterInfo> CollectSetterInfos(
                 si.m_bByValue = IsCppScalarPassByValue(cti.m_TypeName);
             }
         }
-
         result.push_back(std::move(si));
     }
     return result;
@@ -420,7 +426,7 @@ static void EmitMembersCpp(std::ostringstream& out,
         const std::string fieldName = bCleanNames ? CleanMemberName(mv.m_Name) : mv.m_Name;
 
         // === Struct field ===
-        if (auto* sp = std::get_if<StructType*>(&mv.m_Type))
+        if (mv.m_Type && mv.m_Type->IsStruct())
         {
             if (!lm) { cursor = fieldOffset; continue; }
 
@@ -428,17 +434,13 @@ static void EmitMembersCpp(std::ostringstream& out,
             {
                 // No padding anywhere in this struct's layout: its C++ layout matches
                 // the HLSL cbuffer layout exactly, so emit it as the typed struct.
-                out << ind << "srrhi::" << (*sp)->m_Name << " " << fieldName << ";\n";
+                out << ind << "srrhi::" << mv.m_Type->StructName() << " " << fieldName << ";\n";
             }
             else
             {
                 // Emit struct fields as byte arrays to match std140 cbuffer layout rules.
-                // std140 layout adds implicit padding within or after this struct member;
-                // the computed size includes this padding. Using a byte array guarantees
-                // the layout matches the HLSL cbuffer without relying on C++ struct alignment.
-                // To initialize: create a real instance and use std::memcpy() to copy bytes.
                 out << ind << "uint8_t " << fieldName << "[" << lm->m_Size << "];";
-                out << "  // byte array: std140 adds padding inside/after '" << (*sp)->m_Name << "'\n";
+                out << "  // byte array: std140 adds padding inside/after '" << mv.m_Type->StructName() << "'\n";
             }
             if (lm->m_Padding > 0)
                 EmitPadding(out, lm->m_Padding, padCount, ind);
@@ -447,13 +449,10 @@ static void EmitMembersCpp(std::ostringstream& out,
         }
 
         // === ExternType field ===
-        if (auto* ext = std::get_if<ExternType>(&mv.m_Type))
+        if (mv.m_Type && mv.m_Type->IsExtern())
         {
             // Extern type: emit the field using the external type name directly (no srrhi:: prefix).
-            // srrhi assumes sizeof(T) % 16 == 0 for cbuffer packing and uses std::memcpy for upload;
-            // the static_asserts at the top of this header enforce those constraints.
-            // Cursor is not advanced because sizeof is unknown to the layout engine.
-            out << ind << ext->m_Name << " " << fieldName << ";\n";
+            out << ind << mv.m_Type->DisplayName() << " " << fieldName << ";\n";
             cursor = fieldOffset;
             continue;
         }
@@ -461,16 +460,14 @@ static void EmitMembersCpp(std::ostringstream& out,
         // === BuiltinType or ArrayNode field ===
         if (!lm) { cursor = fieldOffset; continue; }
 
-        bool bIsArray = std::holds_alternative<std::shared_ptr<ArrayNode>>(lm->m_Type);
+        bool bIsArray = lm->m_Type && lm->m_Type->IsArray();
 
         if (bIsArray)
         {
-            const ArrayNode& arr = *std::get<std::shared_ptr<ArrayNode>>(lm->m_Type);
-
-            if (arr.m_bCreatedFromMatrix)
+            if (lm->m_Type->IsCreatedFromMatrix())
             {
                 // Try to map to DirectX matrix type
-                std::string matrixType = MapMatrixType(arr, lm->m_Size);
+                std::string matrixType = MapMatrixType(*lm->m_Type, lm->m_Size);
                 
                 if (!matrixType.empty())
                 {
@@ -508,10 +505,9 @@ static void EmitMembersCpp(std::ostringstream& out,
         else
         {
             // Single non-array BuiltinType field
-            const BuiltinType* bt = std::get_if<BuiltinType>(&lm->m_Type);
-            if (bt)
+            if (lm->m_Type && lm->m_Type->IsBuiltin())
             {
-                auto cti = MapBuiltinToCpp(*bt);
+                auto cti = MapBuiltinToCpp(static_cast<const BuiltinTypeRef&>(*lm->m_Type));
                 out << ind << cti.m_TypeName << " " << fieldName;
                 if (cti.m_ArrayMult > 0) out << "[" << cti.m_ArrayMult << "]";
                 out << ";\n";
@@ -645,30 +641,29 @@ static void EmitStructCpp(std::ostringstream& out, const StructType& st,
     std::string fInd("    ");
     for (const auto& mv : st.m_Members)
     {
-        if (auto* sp = std::get_if<StructType*>(&mv.m_Type))
-            out << fInd << (*sp)->m_Name << " " << mv.m_Name << ";\n";
-        else if (auto* ext = std::get_if<ExternType>(&mv.m_Type))
+        if (mv.m_Type && mv.m_Type->IsStruct())
+            out << fInd << mv.m_Type->StructName() << " " << mv.m_Name << ";\n";
+        else if (mv.m_Type && mv.m_Type->IsExtern())
         {
             // Extern type: emit the field using the external type name directly (no srrhi:: prefix).
             // The type must be visible at the point this header is included (see header-top comment).
-            out << fInd << ext->m_Name << " " << mv.m_Name << ";\n";
+            out << fInd << mv.m_Type->DisplayName() << " " << mv.m_Name << ";\n";
         }
-        else if (auto* bt = std::get_if<BuiltinType>(&mv.m_Type))
+        else if (mv.m_Type && mv.m_Type->IsBuiltin())
         {
-            auto cti = MapBuiltinToCpp(*bt);
+            auto cti = MapBuiltinToCpp(static_cast<const BuiltinTypeRef&>(*mv.m_Type));
             out << fInd << cti.m_TypeName << " " << mv.m_Name;
             if (cti.m_ArrayMult > 0) out << "[" << cti.m_ArrayMult << "]";
             out << ";\n";
         }
-        else if (auto* ap = std::get_if<std::shared_ptr<ArrayNode>>(&mv.m_Type))
+        else if (mv.m_Type && mv.m_Type->IsArray())
         {
-            const ArrayNode& arr = **ap;
-            if (arr.m_bCreatedFromMatrix)
+            if (mv.m_Type->IsCreatedFromMatrix())
             {
                 // Try to map to DirectX matrix type
                 // Note: For named structs, we don't have computed layout sizes, so pass 0 (no size verification)
-                std::string matrixType = MapMatrixType(arr, 0);
-                
+                std::string matrixType = MapMatrixType(*mv.m_Type, 0);
+
                 if (!matrixType.empty())
                 {
                     // Use DirectX matrix type directly
@@ -677,29 +672,31 @@ static void EmitStructCpp(std::ostringstream& out, const StructType& st,
                 else
                 {
                     // Matrix: emit as array of column vectors for non-standard matrices
-                    if (auto* elemBt = std::get_if<BuiltinType>(&arr.m_ElementType))
+                    const auto& elemType = mv.m_Type->ElementType();
+                    if (elemType && elemType->IsBuiltin())
                     {
-                        auto cti = MapBuiltinToCpp(*elemBt);
-                        out << fInd << cti.m_TypeName << " " << mv.m_Name << "[" << arr.m_ArraySize << "];\n";
+                        auto cti = MapBuiltinToCpp(static_cast<const BuiltinTypeRef&>(*elemType));
+                        out << fInd << cti.m_TypeName << " " << mv.m_Name << "[" << mv.m_Type->ArraySize() << "];\n";
                     }
                 }
             }
             else
             {
-                if (auto* elemBt = std::get_if<BuiltinType>(&arr.m_ElementType))
+                const auto& elemType = mv.m_Type->ElementType();
+                if (elemType && elemType->IsBuiltin())
                 {
-                    auto cti = MapBuiltinToCpp(*elemBt);
-                    out << fInd << cti.m_TypeName << " " << mv.m_Name << "[" << arr.m_ArraySize << "]";
-                    if (!arr.m_SizeExpr.empty())
-                        out << "; // " << arr.m_SizeExpr << "\n";
+                    auto cti = MapBuiltinToCpp(static_cast<const BuiltinTypeRef&>(*elemType));
+                    out << fInd << cti.m_TypeName << " " << mv.m_Name << "[" << mv.m_Type->ArraySize() << "]";
+                    if (!mv.m_Type->SizeExpr().empty())
+                        out << "; // " << mv.m_Type->SizeExpr() << "\n";
                     else
                         out << ";\n";
                 }
-                else if (auto* elemSp = std::get_if<StructType*>(&arr.m_ElementType))
+                else if (elemType && elemType->IsStruct())
                 {
-                    out << fInd << (*elemSp)->m_Name << " " << mv.m_Name << "[" << arr.m_ArraySize << "]";
-                    if (!arr.m_SizeExpr.empty())
-                        out << "; // " << arr.m_SizeExpr << "\n";
+                    out << fInd << elemType->StructName() << " " << mv.m_Name << "[" << mv.m_Type->ArraySize() << "]";
+                    if (!mv.m_Type->SizeExpr().empty())
+                        out << "; // " << mv.m_Type->SizeExpr() << "\n";
                     else
                         out << ";\n";
                 }
@@ -717,29 +714,32 @@ static void EmitStructCpp(std::ostringstream& out, const StructType& st,
 // static_asserts.
 // ---------------------------------------------------------------------------
 static void CollectExternTypesInTypeRef(
-    const TypeRef& type,
+    const std::shared_ptr<TypeRef>& type,
     const ParseResult& pr,
-    std::unordered_set<std::string>& visited,   // visited StructType* names (cycle guard)
+    std::unordered_set<std::string>& visited,
     std::unordered_set<std::string>& outExterns)
 {
-    if (auto* ext = std::get_if<ExternType>(&type))
+    if (!type) return;
+    if (type->IsExtern())
     {
-        outExterns.insert(ext->m_Name);
+        outExterns.insert(type->DisplayName());
         return;
     }
-    if (auto* ap = std::get_if<std::shared_ptr<ArrayNode>>(&type))
+    if (type->IsArray())
     {
-        CollectExternTypesInTypeRef((*ap)->m_ElementType, pr, visited, outExterns);
+        CollectExternTypesInTypeRef(type->ElementType(), pr, visited, outExterns);
         return;
     }
-    if (auto* sp = std::get_if<StructType*>(&type))
+    if (type->IsStruct())
     {
-        const StructType* st = *sp;
-        if (!st || visited.count(st->m_Name)) return;
-        visited.insert(st->m_Name);
-        for (const auto& mv : st->m_Members)
-            CollectExternTypesInTypeRef(mv.m_Type, pr, visited, outExterns);
-        visited.erase(st->m_Name);
+        const std::string name = type->StructName();
+        if (name.empty() || visited.count(name)) return;
+        visited.insert(name);
+        const auto* members = type->Members();
+        if (members)
+            for (const auto& mv : *members)
+                CollectExternTypesInTypeRef(mv.m_Type, pr, visited, outExterns);
+        visited.erase(name);
     }
 }
 

@@ -74,10 +74,7 @@ static void visitMember(VisualizerState& vs, const LayoutMember& m,
 // Visit all submembers of a node (struct or array contents)
 static void visitSubmembers(VisualizerState& vs, const LayoutMember& parent)
 {
-    bool bIsMatrix = false;
-    if (auto* ap = std::get_if<std::shared_ptr<ArrayNode>>(&parent.m_Type))
-        bIsMatrix = (*ap)->m_bCreatedFromMatrix;
-
+    bool bIsMatrix = parent.m_Type && parent.m_Type->IsCreatedFromMatrix();
     for (auto& sub : parent.m_Submembers)
         visitMember(vs, sub, bIsMatrix);
 }
@@ -85,29 +82,27 @@ static void visitSubmembers(VisualizerState& vs, const LayoutMember& parent)
 static void visitMember(VisualizerState& vs, const LayoutMember& m,
                         bool bParentIsMatrix)
 {
-    // --- BuiltinType leaf ---
-    if (std::holds_alternative<BuiltinType>(m.m_Type))
+    // --- BuiltinTypeRef leaf ---
+    if (m.m_Type && m.m_Type->IsBuiltin())
     {
-        const auto& bt = std::get<BuiltinType>(m.m_Type);
         // Matrix columns have no trailing ";"
         std::string label = m.m_Name + (bParentIsMatrix ? "" : ";");
-        vs.emitLeaf(bt.m_Name, label, m.m_Offset, m.m_Size, m.m_Padding);
+        vs.emitLeaf(m.m_Type->DisplayName(), label, m.m_Offset, m.m_Size, m.m_Padding);
         return;
     }
 
-    // --- ArrayNode (array or matrix) ---
-    if (auto* ap = std::get_if<std::shared_ptr<ArrayNode>>(&m.m_Type))
+    // --- ArrayTypeRef (array or matrix) ---
+    if (m.m_Type && m.m_Type->IsArray())
     {
         // Recurse: each element is a submember rendered by visitMember
         visitSubmembers(vs, m);
         return;
     }
 
-    // --- StructType* (struct) ---
-    if (auto* sp = std::get_if<StructType*>(&m.m_Type))
+    // --- StructTypeRef (struct) ---
+    if (m.m_Type && m.m_Type->IsStruct())
     {
-        const StructType* st = *sp;
-        std::string typeName = "struct " + st->m_Name;
+        std::string typeName = "struct " + m.m_Type->StructName();
         vs.emitStructOpen(typeName);
         for (auto& sub : m.m_Submembers)
             visitMember(vs, sub, false);

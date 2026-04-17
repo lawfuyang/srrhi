@@ -13,40 +13,39 @@
 // ---------------------------------------------------------------------------
 // HLSL type name reconstruction from TypeRef
 // ---------------------------------------------------------------------------
-static std::string HlslTypeName(const TypeRef& t)
+static std::string HlslTypeName(const std::shared_ptr<TypeRef>& t)
 {
-    if (auto* bt = std::get_if<BuiltinType>(&t))
-        return bt->m_Name;
+    if (!t) return "???";
+    if (t->IsBuiltin())
+        return t->DisplayName();
 
-    if (auto* ap = std::get_if<std::shared_ptr<ArrayNode>>(&t))
+    if (t->IsArray())
     {
-        const ArrayNode& arr = **ap;
-        if (arr.m_bCreatedFromMatrix)
+        if (t->IsCreatedFromMatrix())
         {
             // Reconstruct as row_major matrix
             // Column-major (default): element.m_VectorSize = rows, arraySize = cols
             // Row-major:              element.m_VectorSize = cols, arraySize = rows
-            const BuiltinType* elem = std::get_if<BuiltinType>(&arr.m_ElementType);
-            if (!elem)
-                throw std::runtime_error("matrix element is not a BuiltinType");
+            const auto& elem = t->ElementType();
+            if (!elem || !elem->IsBuiltin())
+                throw std::runtime_error("matrix element is not a BuiltinTypeRef");
 
-            int vs = elem->m_VectorSize;  // rows for col-major, cols for row-major
-            int as = arr.m_ArraySize;     // cols for col-major, rows for row-major
+            int vs = elem->VectorSize();  // rows for col-major, cols for row-major
+            int as = t->ArraySize();      // cols for col-major, rows for row-major
 
             // Always emit as row_major
-            std::string base = "row_major " + elem->m_ScalarName +
-                               std::to_string(as) + "x" + std::to_string(vs);
-            return base;
+            return "row_major " + elem->ScalarName() +
+                   std::to_string(as) + "x" + std::to_string(vs);
         }
         // Regular array: recurse for element type name + [size]
-        return HlslTypeName(arr.m_ElementType) + "[" + std::to_string(arr.m_ArraySize) + "]";
+        return HlslTypeName(t->ElementType()) + "[" + std::to_string(t->ArraySize()) + "]";
     }
 
-    if (auto* sp = std::get_if<StructType*>(&t))
-        return (*sp)->m_Name;
+    if (t->IsStruct())
+        return t->StructName();
 
-    if (auto* ext = std::get_if<ExternType>(&t))
-        return ext->m_Name;  // emit the external type name as-is
+    if (t->IsExtern())
+        return t->DisplayName();  // emit the external type name as-is
 
     return "???";
 }
@@ -104,20 +103,19 @@ static void EmitStructBodyHlsl(std::ostringstream& out,
             EmitPadding(out, fieldOffset - cursor, padCount, fInd);
 
         // Emit the field declaration
-        if (auto* structP = std::get_if<StructType*>(&mv.m_Type))
+        if (mv.m_Type && mv.m_Type->IsStruct())
         {
             // Struct field
-            out << fInd << (*structP)->m_Name << " " << mv.m_Name << ";\n";
+            out << fInd << mv.m_Type->StructName() << " " << mv.m_Name << ";\n";
         }
-        else if (auto* ext = std::get_if<ExternType>(&mv.m_Type))
+        else if (mv.m_Type && mv.m_Type->IsExtern())
         {
             // Extern type field: emit the external type name as-is
-            out << fInd << ext->m_Name << " " << mv.m_Name << ";\n";
+            out << fInd << mv.m_Type->DisplayName() << " " << mv.m_Name << ";\n";
         }
-        else if (auto* ap = std::get_if<std::shared_ptr<ArrayNode>>(&mv.m_Type))
+        else if (mv.m_Type && mv.m_Type->IsArray())
         {
-            const ArrayNode& arr = **ap;
-            if (arr.m_bCreatedFromMatrix)
+            if (mv.m_Type->IsCreatedFromMatrix())
             {
                 // Matrix: type name already includes NxM, no array suffix
                 out << fInd << HlslTypeName(mv.m_Type) << " " << mv.m_Name << ";\n";
@@ -126,11 +124,11 @@ static void EmitStructBodyHlsl(std::ostringstream& out,
             {
                 // Regular array: use original alias name if element type came from a macro alias.
                 std::string elemName = mv.m_OriginalTypeName.empty()
-                    ? HlslTypeName(arr.m_ElementType) : mv.m_OriginalTypeName;
+                    ? HlslTypeName(mv.m_Type->ElementType()) : mv.m_OriginalTypeName;
                 out << fInd << elemName << " " << mv.m_Name
-                    << "[" << arr.m_ArraySize << "]";
-                if (!arr.m_SizeExpr.empty())
-                    out << "; // " << arr.m_SizeExpr << "\n";
+                    << "[" << mv.m_Type->ArraySize() << "]";
+                if (!mv.m_Type->SizeExpr().empty())
+                    out << "; // " << mv.m_Type->SizeExpr() << "\n";
                 else
                     out << ";\n";
             }

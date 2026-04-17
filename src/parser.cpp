@@ -168,17 +168,17 @@ static ParseResult ParseFileInternal(const std::string& path);
 // When structs are moved from inc.m_Structs → result.m_Structs, any StructType*
 // inside the moved structs must be remapped to the new addresses.
 // ---------------------------------------------------------------------------
-static void FixupTypeRef(TypeRef& t,
+static void FixupTypeRef(std::shared_ptr<TypeRef>& t,
                          const std::unordered_map<StructType*, StructType*>& remap)
 {
-    if (auto* sp = std::get_if<StructType*>(&t))
+    if (!t) return;
+    t->RemapStruct(remap);
+    if (t->IsArray())
     {
-        auto it = remap.find(*sp);
-        if (it != remap.end()) *sp = it->second;
-    }
-    else if (auto* ap = std::get_if<std::shared_ptr<ArrayNode>>(&t))
-    {
-        FixupTypeRef((*ap)->m_ElementType, remap);
+        // ElementType() returns a const ref; we need to recurse into the mutable
+        // element type stored inside the ArrayTypeRef.
+        auto* arr = static_cast<ArrayTypeRef*>(t.get());
+        FixupTypeRef(arr->m_ElementType, remap);
     }
 }
 
@@ -214,7 +214,7 @@ struct Parser
     // Macro definitions: name → value string ("" for flag macros and type aliases).
     std::unordered_map<std::string, std::string> m_Defines;
     // Type aliases from #define, typedef, or using — name → resolved TypeRef.
-    std::unordered_map<std::string, TypeRef>     m_TypeAliases;
+    std::unordered_map<std::string, std::shared_ptr<TypeRef>> m_TypeAliases;
 
     // Conditional compilation stack (#if / #ifdef / #else / #endif).
     struct CondFrame
@@ -670,7 +670,7 @@ struct Parser
                 // Parse and validate the type using the standard type parser.
                 try
                 {
-                    TypeRef aliasType = ParseNonStructType();
+                    auto aliasType = ParseNonStructType();
                     m_TypeAliases[macroName.m_Text] = std::move(aliasType);
                     m_Defines[macroName.m_Text] = ""; // also mark defined for defined() checks
                 }
@@ -888,28 +888,28 @@ struct Parser
     // -----------------------------------------------------------------------
     // Type building helpers
     // -----------------------------------------------------------------------
-    TypeRef MakeBuiltin(const ScalarInfo& si, int vectorSize,
-                        bool bCreatedFromMatrix = false) const
+    std::shared_ptr<TypeRef> MakeBuiltin(const ScalarInfo& si, int vectorSize,
+                                         bool bCreatedFromMatrix = false) const
     {
-        BuiltinType bt;
-        bt.m_ScalarName         = si.m_Name;
-        bt.m_ElementSize        = si.m_ElementSize;
-        bt.m_Alignment          = si.m_ElementSize;
-        bt.m_VectorSize         = vectorSize;
-        bt.m_bCreatedFromMatrix= bCreatedFromMatrix;
-        bt.m_Name = (vectorSize == 1) ? si.m_Name : si.m_Name + std::to_string(vectorSize);
+        auto bt = std::make_shared<BuiltinTypeRef>();
+        bt->m_ScalarName          = si.m_Name;
+        bt->m_ElementSize         = si.m_ElementSize;
+        bt->m_Alignment_          = si.m_ElementSize;
+        bt->m_VectorSize          = vectorSize;
+        bt->m_bCreatedFromMatrix  = bCreatedFromMatrix;
+        bt->m_Name = (vectorSize == 1) ? si.m_Name : si.m_Name + std::to_string(vectorSize);
         return bt;
     }
 
-    TypeRef MakeArray(TypeRef elemType, int arraySize,
-                      bool bCreatedFromMatrix = false,
-                      const std::string& sizeExpr = "") const
+    std::shared_ptr<TypeRef> MakeArray(std::shared_ptr<TypeRef> elemType, int arraySize,
+                                       bool bCreatedFromMatrix = false,
+                                       const std::string& sizeExpr = "") const
     {
-        auto node = std::make_shared<ArrayNode>();
-        node->m_ElementType          = elemType;
-        node->m_ArraySize            = arraySize;
+        auto node = std::make_shared<ArrayTypeRef>();
+        node->m_ElementType         = elemType;
+        node->m_ArraySize           = arraySize;
         node->m_bCreatedFromMatrix  = bCreatedFromMatrix;
-        node->m_SizeExpr             = sizeExpr;
+        node->m_SizeExpr            = sizeExpr;
         node->m_Name = TypeDisplayName(node->m_ElementType) +
                        "[" + (sizeExpr.empty() ? std::to_string(arraySize) : sizeExpr) + "]";
         return node;
@@ -918,7 +918,7 @@ struct Parser
     // -----------------------------------------------------------------------
     // matrix<T,r,c> or vector<T,n>
     // -----------------------------------------------------------------------
-    TypeRef ParseTemplateType(const std::string& keyword)
+    std::shared_ptr<TypeRef> ParseTemplateType(const std::string& keyword)
     {
         bool bIsMatrix = (keyword == "matrix");
         std::string scalarKey = "float";
@@ -946,7 +946,7 @@ struct Parser
 
         if (bIsMatrix)
         {
-            TypeRef elem = MakeBuiltin(*si, vectorSize, true);
+            auto elem = MakeBuiltin(*si, vectorSize, true);
             if (arraySize == 1) return elem;
             return MakeArray(std::move(elem), arraySize, true);
         }
@@ -956,7 +956,7 @@ struct Parser
     // -----------------------------------------------------------------------
     // NonStructType: optional row/column_major qualifier + type name
     // -----------------------------------------------------------------------
-    TypeRef ParseNonStructType()
+    std::shared_ptr<TypeRef> ParseNonStructType()
     {
         m_LastResolvedAliasName.clear();
         bool bIsRowMajor = false;
@@ -1022,7 +1022,7 @@ struct Parser
                 }
                 int vectorSize = bIsRowMajor ? cols : rows;
                 int arraySize  = bIsRowMajor ? rows : cols;
-                TypeRef elem = MakeBuiltin(info, vectorSize, true);
+                auto elem = MakeBuiltin(info, vectorSize, true);
                 if (arraySize == 1) return elem; // NxM where M=1 is just a vector
                 return MakeArray(std::move(elem), arraySize, true);
             }
@@ -1077,8 +1077,8 @@ struct Parser
                         throw std::runtime_error(m_FilePath + ":" + std::to_string(nameLine) +
                                                  ": row_major/column_major qualifier cannot be applied"
                                                  " to extern type '" + qualName + "'");
-                    ExternType ext;
-                    ext.m_Name = qualName;
+                    auto ext = std::make_shared<ExternTypeRef>();
+                    ext->m_Name = qualName;
                     return ext;
                 }
                 // Qualified name not found — restore to just after the first identifier
@@ -1090,7 +1090,11 @@ struct Parser
         // Named struct reference
         auto structIt = m_StructMap.find(name);
         if (structIt != m_StructMap.end())
-            return structIt->second; // StructType*
+        {
+            auto sr = std::make_shared<StructTypeRef>();
+            sr->m_Struct = structIt->second;
+            return sr;
+        }
 
         // Type alias defined via #define, typedef, or using
         auto aliasIt = m_TypeAliases.find(name);
@@ -1101,7 +1105,7 @@ struct Parser
                                          ": row_major/column_major qualifier cannot be applied"
                                          " to type alias '" + name + "'");
             m_LastResolvedAliasName = name; // remember original name for HLSL output
-            return aliasIt->second;
+            return aliasIt->second->Clone(); // return a fresh copy of the aliased type
         }
 
         // Externally-defined type declared with 'extern TypeName;' (simple unqualified name)
@@ -1111,8 +1115,8 @@ struct Parser
                 throw std::runtime_error(m_FilePath + ":" + std::to_string(nameLine) +
                                          ": row_major/column_major qualifier cannot be applied"
                                          " to extern type '" + name + "'");
-            ExternType ext;
-            ext.m_Name = name;
+            auto ext = std::make_shared<ExternTypeRef>();
+            ext->m_Name = name;
             return ext;
         }
 
@@ -1137,7 +1141,7 @@ struct Parser
     // Also supports a single [SrInputName::ConstName] referencing a scalar
     // const of integral type from a previously-declared srinput block.
     // -----------------------------------------------------------------------
-    TypeRef ParseArrayDims(TypeRef elemType)
+    std::shared_ptr<TypeRef> ParseArrayDims(std::shared_ptr<TypeRef> elemType)
     {
         int total = 1;
         std::string sizeExpr; // symbolic expression when size came from a scalar const ref
@@ -1269,16 +1273,16 @@ struct Parser
                                      "' is not allowed in cbuffer or struct; use it inside an srinput block");
         }
 
-        TypeRef memberType = ParseNonStructType();
+        auto memberType = ParseNonStructType();
         std::string memberAliasName = m_LastResolvedAliasName; // non-empty if type was a macro alias
 
         do
         {
             Token nameTok = Expect(TokKind::Ident, "member name");
-            TypeRef fieldType = memberType; // copy
+            auto fieldType = memberType->Clone(); // copy
 
             if (TryConsume(TokKind::LBracket))
-                fieldType = ParseArrayDims(std::move(fieldType));
+                fieldType = ParseArrayDims(fieldType);
 
             // Check for and reject semantic annotations (e.g., packoffset)
             if (Check(TokKind::Colon))
@@ -1474,7 +1478,11 @@ struct Parser
                 m_Result.m_DeclOrder.push_back({ParseResult::DeclKind::BufferDef, m_Result.m_BufferDefs.size() - 1});
 
                 MemberVariable mv;
-                mv.m_Type      = &m_Result.m_BufferDefs.back();
+                {
+                    auto srRef = std::make_shared<StructTypeRef>();
+                    srRef->m_Struct = &m_Result.m_BufferDefs.back();
+                    mv.m_Type = std::move(srRef);
+                }
                 mv.m_Name      = "";
                 mv.m_bIsCBuffer = true;
                 m_Result.m_Buffers.push_back(std::move(mv));
@@ -1503,13 +1511,23 @@ struct Parser
 
                 // Wrap inner struct in outer struct
                 StructType outer{ varTok.m_Text, {} };
-                MemberVariable innerMv; innerMv.m_Type = it->second; innerMv.m_Name = "";
+                MemberVariable innerMv;
+                {
+                    auto innerRef = std::make_shared<StructTypeRef>();
+                    innerRef->m_Struct = it->second;
+                    innerMv.m_Type = std::move(innerRef);
+                }
+                innerMv.m_Name = "";
                 outer.m_Members.push_back(std::move(innerMv));
                 m_Result.m_BufferDefs.push_back(std::move(outer));
                 m_Result.m_DeclOrder.push_back({ParseResult::DeclKind::BufferDef, m_Result.m_BufferDefs.size() - 1});
 
                 MemberVariable mv;
-                mv.m_Type      = &m_Result.m_BufferDefs.back();
+                {
+                    auto srRef = std::make_shared<StructTypeRef>();
+                    srRef->m_Struct = &m_Result.m_BufferDefs.back();
+                    mv.m_Type = std::move(srRef);
+                }
                 mv.m_Name      = varTok.m_Text;
                 mv.m_bIsCBuffer = true;
                 m_Result.m_Buffers.push_back(std::move(mv));
@@ -1521,7 +1539,7 @@ struct Parser
             {
                 Advance();
                 Expect(TokKind::LAngle, "<");
-                TypeRef templateType = ParseNonStructType();
+                auto templateType = ParseNonStructType();
                 Expect(TokKind::RAngle, ">");
                 Token varTok = Expect(TokKind::Ident, "variable name");
                 while (TryConsume(TokKind::LBracket)) { ParseInteger(); Expect(TokKind::RBracket, "]"); }
@@ -1535,7 +1553,9 @@ struct Parser
                 m_Result.m_DeclOrder.push_back({ParseResult::DeclKind::BufferDef, m_Result.m_BufferDefs.size() - 1});
 
                 MemberVariable mv;
-                mv.m_Type      = &m_Result.m_BufferDefs.back();
+                auto srRef = std::make_shared<StructTypeRef>();
+                srRef->m_Struct = &m_Result.m_BufferDefs.back();
+                mv.m_Type      = std::move(srRef);
                 mv.m_Name      = varTok.m_Text;
                 mv.m_bIsSBuffer = true;
                 m_Result.m_Buffers.push_back(std::move(mv));
@@ -2225,7 +2245,7 @@ struct Parser
             if (kw == "typedef")
             {
                 Advance(); // consume 'typedef'
-                TypeRef baseType = ParseNonStructType();
+                auto baseType = ParseNonStructType();
                 Token aliasName  = Expect(TokKind::Ident, "alias name after base type in typedef");
                 Expect(TokKind::Semicolon, ";");
                 // Reconstruct a HLSL-compatible typedef line for passthrough (file-scope only).
@@ -2247,7 +2267,7 @@ struct Parser
                     throw std::runtime_error(m_FilePath + ":" + std::to_string(aliasName.m_Line) +
                                              ": expected '=' after alias name in 'using' declaration");
                 Advance(); // consume '='
-                TypeRef baseType = ParseNonStructType();
+                auto baseType = ParseNonStructType();
                 Expect(TokKind::Semicolon, ";");
                 // Reconstruct a HLSL-compatible typedef line for passthrough (file-scope only).
                 if (m_CondStack.empty())
@@ -2271,30 +2291,10 @@ struct Parser
 
 // ---------------------------------------------------------------------------
 // TypeRef helpers (also used in layout.cpp and codegen)
+// These free functions delegate to the virtual methods on the TypeRef hierarchy.
 // ---------------------------------------------------------------------------
-int TypeAlignment(const TypeRef& t)
-{
-    if (auto* bt = std::get_if<BuiltinType>(&t))
-        return bt->m_Alignment;
-    if (auto* ap = std::get_if<std::shared_ptr<ArrayNode>>(&t))
-        return TypeAlignment((*ap)->m_ElementType);
-    if (std::get_if<ExternType>(&t))
-        return 4; // unknown alignment; default to 4 (skipped by layout engine)
-    return 16; // StructType* -> always 16-byte aligned in cbuffers
-}
-
-std::string TypeDisplayName(const TypeRef& t)
-{
-    if (auto* bt = std::get_if<BuiltinType>(&t))
-        return bt->m_Name;
-    if (auto* ap = std::get_if<std::shared_ptr<ArrayNode>>(&t))
-        return (*ap)->m_Name;
-    if (auto* sp = std::get_if<StructType*>(&t))
-        return "struct " + (*sp)->m_Name;
-    if (auto* ext = std::get_if<ExternType>(&t))
-        return ext->m_Name;
-    return "???";
-}
+// (TypeAlignment and TypeDisplayName are inline in types.h; definitions here
+//  are kept as thin wrappers for any translation unit that only sees the header.)
 
 // ---------------------------------------------------------------------------
 // LayoutMember helpers
@@ -2303,7 +2303,7 @@ void LayoutMember::SetPadding(int p)
 {
     m_Padding = p;
     // Propagate into last array-element submember
-    if (std::holds_alternative<std::shared_ptr<ArrayNode>>(m_Type) && !m_Submembers.empty())
+    if (m_Type && m_Type->IsArray() && !m_Submembers.empty())
         m_Submembers.back().m_Padding = p;
 }
 
