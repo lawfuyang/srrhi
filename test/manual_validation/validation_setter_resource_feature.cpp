@@ -569,6 +569,56 @@ void DemoCompileErrors()
 #endif  // 0 — intentional compile errors if enabled
 
 // =============================================================================
+// resourceName field
+// =============================================================================
+
+// Verifies that ResourceEntry::resourceName matches the variable name as declared
+// in the .sr source file for every resource in SetterTestInputs.
+static bool TestResourceNames()
+{
+    SetterTestInputs inputs;
+
+    // CBuffer (b0)
+    VALIDATE(std::string_view(inputs.m_Resources[0].resourceName)  == "m_Frame");
+
+    // Texture SRVs (t0..t8)
+    VALIDATE(std::string_view(inputs.m_Resources[1].resourceName)  == "m_Tex1d");
+    VALIDATE(std::string_view(inputs.m_Resources[2].resourceName)  == "m_Tex1dArray");
+    VALIDATE(std::string_view(inputs.m_Resources[3].resourceName)  == "m_Tex2d");
+    VALIDATE(std::string_view(inputs.m_Resources[4].resourceName)  == "m_Tex2dArray");
+    VALIDATE(std::string_view(inputs.m_Resources[5].resourceName)  == "m_Tex2dms");
+    VALIDATE(std::string_view(inputs.m_Resources[6].resourceName)  == "m_Tex2dmsArray");
+    VALIDATE(std::string_view(inputs.m_Resources[7].resourceName)  == "m_Tex3d");
+    VALIDATE(std::string_view(inputs.m_Resources[8].resourceName)  == "m_TexCube");
+    VALIDATE(std::string_view(inputs.m_Resources[9].resourceName)  == "m_TexCubeArray");
+
+    // Non-texture SRVs (t9..t12)
+    VALIDATE(std::string_view(inputs.m_Resources[10].resourceName) == "m_TypedBuf");
+    VALIDATE(std::string_view(inputs.m_Resources[11].resourceName) == "m_StructBuf");
+    VALIDATE(std::string_view(inputs.m_Resources[12].resourceName) == "m_RawBuf");
+    VALIDATE(std::string_view(inputs.m_Resources[13].resourceName) == "m_AccelStruct");
+
+    // Texture UAVs (u0..u4)
+    VALIDATE(std::string_view(inputs.m_Resources[14].resourceName) == "m_RwTex1d");
+    VALIDATE(std::string_view(inputs.m_Resources[15].resourceName) == "m_RwTex1dArray");
+    VALIDATE(std::string_view(inputs.m_Resources[16].resourceName) == "m_RwTex2d");
+    VALIDATE(std::string_view(inputs.m_Resources[17].resourceName) == "m_RwTex2dArray");
+    VALIDATE(std::string_view(inputs.m_Resources[18].resourceName) == "m_RwTex3d");
+
+    // Non-texture UAVs (u5..u7)
+    VALIDATE(std::string_view(inputs.m_Resources[19].resourceName) == "m_RwTypedBuf");
+    VALIDATE(std::string_view(inputs.m_Resources[20].resourceName) == "m_RwStructBuf");
+    VALIDATE(std::string_view(inputs.m_Resources[21].resourceName) == "m_RwRawBuf");
+
+    // Samplers (s0..s1)
+    VALIDATE(std::string_view(inputs.m_Resources[22].resourceName) == "m_LinearSampler");
+    VALIDATE(std::string_view(inputs.m_Resources[23].resourceName) == "m_ShadowSampler");
+
+    printf("  [PASS] resourceName: all 24 entries match .sr variable names\n");
+    return true;
+}
+
+// =============================================================================
 // MAIN
 // =============================================================================
 
@@ -578,6 +628,9 @@ int main()
 
     printf("--- Entry Defaults & Compile-time Constants ---\n");
     TestResourceEntryDefaults();
+
+    printf("\n--- resourceName field ---\n");
+    TestResourceNames();
 
     printf("\n--- Non-texture Setters (simple void*) + Texture SRV simple overload ---\n");
     TestSimpleSetterOverload();

@@ -119,6 +119,10 @@ enum class ResourceType : uint32_t
 //                    appropriate TextureDimension value for texture resources
 //                    (Texture_SRV and Texture_UAV), or None for all other types.
 //
+//   resourceName   — Compile-time null-terminated string containing the variable
+//                    name as declared in the .sr source file (e.g. "m_DiffuseTex").
+//                    Useful for introspection, debugging, and reflection at runtime.
+//
 //   baseMipLevel   — First mip level to bind. Relevant for texture types only.
 //                    Default: 0.
 //
@@ -137,14 +141,15 @@ enum class ResourceType : uint32_t
 // =============================================================================
 struct ResourceEntry
 {
-    void*              pResource      = nullptr; ///< Runtime resource pointer (set via Set*() helpers).
-    const uint32_t        slot;                     ///< Compile-time register slot index (t#/u#/b#/s#).
-    const ResourceType    type;                     ///< Compile-time resource type classification.
-    const TextureDimension textureDimension;        ///< Compile-time texture dimensionality (None for non-textures).
-    int32_t               baseMipLevel   =  0;      ///< Base mip level  (textures only; default 0).
-    int32_t            numMipLevels   = -1;      ///< Mip level count (textures only; -1 = all mips).
-    int32_t            baseArraySlice =  0;      ///< Base array slice (array textures only; default 0).
-    int32_t            numArraySlices = -1;      ///< Array slice count (array textures only; -1 = all slices).
+    void*                  pResource        = nullptr; ///< Runtime resource pointer (set via Set*() helpers).
+    const uint32_t         slot;                       ///< Compile-time register slot index (t#/u#/b#/s#).
+    const ResourceType     type;                       ///< Compile-time resource type classification.
+    const TextureDimension textureDimension;           ///< Compile-time texture dimensionality (None for non-textures).
+    const char*            resourceName     = nullptr; ///< Compile-time variable name as declared in the .sr source file.
+    int32_t                baseMipLevel     =  0;      ///< Base mip level  (textures only; default 0).
+    int32_t                numMipLevels     = -1;      ///< Mip level count (textures only; -1 = all mips).
+    int32_t                baseArraySlice   =  0;      ///< Base array slice (array textures only; default 0).
+    int32_t                numArraySlices   = -1;      ///< Array slice count (array textures only; -1 = all slices).
 };
 
 }  // namespace srrhi

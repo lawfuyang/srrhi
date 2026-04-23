@@ -1075,7 +1075,8 @@ std::string GenerateCpp(const ParseResult& pr,
                         ? "srrhi::ResourceType::PushConstants"
                         : "srrhi::ResourceType::ConstantBuffer";
                     out << "        { nullptr, " << constName
-                        << ", " << resType << ", srrhi::TextureDimension::None },\n";
+                        << ", " << resType << ", srrhi::TextureDimension::None"
+                        << ", \"" << member.m_MemberName << "\"" << " },\n";
                 }
             }
 
@@ -1089,7 +1090,8 @@ std::string GenerateCpp(const ParseResult& pr,
                     const std::string constName = CleanMemberName(rm.m_MemberName) + "RegisterIndex";
                     out << "        { nullptr, " << constName
                         << ", " << ResourceKindToSrrResourceType(rm.m_Kind)
-                        << ", " << ResourceKindToTextureDimension(rm.m_Kind) << " },\n";
+                        << ", " << ResourceKindToTextureDimension(rm.m_Kind)
+                        << ", \"" << rm.m_MemberName << "\"" << " },\n";
                 }
             }
 
@@ -1103,7 +1105,8 @@ std::string GenerateCpp(const ParseResult& pr,
                     const std::string constName = CleanMemberName(rm.m_MemberName) + "RegisterIndex";
                     out << "        { nullptr, " << constName
                         << ", " << ResourceKindToSrrResourceType(rm.m_Kind)
-                        << ", " << ResourceKindToTextureDimension(rm.m_Kind) << " },\n";
+                        << ", " << ResourceKindToTextureDimension(rm.m_Kind)
+                        << ", \"" << rm.m_MemberName << "\"" << " },\n";
                 }
             }
 
@@ -1115,7 +1118,8 @@ std::string GenerateCpp(const ParseResult& pr,
                 {
                     const std::string constName = CleanMemberName(sm.m_MemberName) + "RegisterIndex";
                     out << "        { nullptr, " << constName
-                        << ", srrhi::ResourceType::Sampler, srrhi::TextureDimension::None },\n";
+                        << ", srrhi::ResourceType::Sampler, srrhi::TextureDimension::None"
+                        << ", \"" << sm.m_MemberName << "\"" << " },\n";
                 }
             }
 
