@@ -84,13 +84,15 @@ endfunction()
 
 file(MAKE_DIRECTORY "${CMAKE_SOURCE_DIR}/bin")
 
-set(DXC_VERSION "v1.9.2602")
-set(DXC_URL "https://github.com/microsoft/DirectXShaderCompiler/releases/download/${DXC_VERSION}/dxc_2026_02_20.zip")
-download_library("dxc" "${DXC_VERSION}" "${DXC_URL}" "dxc_*")
-set(DXC_INSTALL_DIR "${CMAKE_SOURCE_DIR}/external/dxc")
-file(CREATE_LINK "${DXC_INSTALL_DIR}/bin/x64/dxc.exe" "${CMAKE_SOURCE_DIR}/bin/dxc.exe" SYMBOLIC)
-file(CREATE_LINK "${DXC_INSTALL_DIR}/bin/x64/dxcompiler.dll" "${CMAKE_SOURCE_DIR}/bin/dxcompiler.dll" SYMBOLIC)
-file(CREATE_LINK "${DXC_INSTALL_DIR}/bin/x64/dxil.dll" "${CMAKE_SOURCE_DIR}/bin/dxil.dll" SYMBOLIC)
+if(SRRHI_BUILD_VALIDATION_TARGETS)
+    set(DXC_VERSION "v1.9.2602")
+    set(DXC_URL "https://github.com/microsoft/DirectXShaderCompiler/releases/download/${DXC_VERSION}/dxc_2026_02_20.zip")
+    download_library("dxc" "${DXC_VERSION}" "${DXC_URL}" "dxc_*")
+    set(DXC_INSTALL_DIR "${CMAKE_SOURCE_DIR}/external/dxc")
+    file(CREATE_LINK "${DXC_INSTALL_DIR}/bin/x64/dxc.exe" "${CMAKE_SOURCE_DIR}/bin/dxc.exe" SYMBOLIC)
+    file(CREATE_LINK "${DXC_INSTALL_DIR}/bin/x64/dxcompiler.dll" "${CMAKE_SOURCE_DIR}/bin/dxcompiler.dll" SYMBOLIC)
+    file(CREATE_LINK "${DXC_INSTALL_DIR}/bin/x64/dxil.dll" "${CMAKE_SOURCE_DIR}/bin/dxil.dll" SYMBOLIC)
+endif()
 
 file(GLOB_RECURSE SOURCES 
     "src/*.cpp"
