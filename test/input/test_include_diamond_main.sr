@@ -1,0 +1,19 @@
+// Diamond include test — main entry point.
+// Both test_include_diamond_a.sr and test_include_diamond_b.sr include
+// test_include_diamond_common.sr, creating a diamond pattern that must
+// not trigger a false circular-include error.
+#include "test_include_diamond_a.sr"
+#include "test_include_diamond_b.sr"
+
+cbuffer LightingData
+{
+    PointLight  g_PointLight;
+    SpotLight   g_SpotLight;
+    DirLight    g_DirLight;
+    MeshLight   g_MeshLight;
+};
+
+srinput LightingInputs
+{
+    LightingData m_lightingData;
+};

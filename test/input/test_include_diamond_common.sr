@@ -1,0 +1,22 @@
+// Common struct definitions — included by multiple other .sr files.
+// This file is the "diamond" target: test_include_diamond_a.sr and
+// test_include_diamond_b.sr both #include this file via different paths,
+// and test_include_diamond_main.sr includes both A and B.
+// The parser must handle this without false circular-include errors.
+struct PointLight
+{
+    float3  position;
+    float   intensity;
+    float3  color;
+    float   range;
+};
+
+struct SpotLight
+{
+    float3  position;
+    float   innerConeAngle;
+    float3  direction;
+    float   outerConeAngle;
+    float3  color;
+    float   intensity;
+};

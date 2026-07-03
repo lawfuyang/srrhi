@@ -16,6 +16,18 @@ namespace fs = std::filesystem;
 // ---------------------------------------------------------------------------
 static thread_local std::unordered_set<std::string> g_IncludedFiles;
 
+// Cache of already-parsed include results, keyed by absolute path.
+// When the same file is #included via multiple paths (diamond pattern),
+// the cached result is reused so struct types remain available.
+struct IncludeCacheEntry
+{
+    std::vector<StructType>          m_Structs;
+    std::vector<StructType*>         m_OriginalPointers; // pointers into the original inc.m_Structs (for remap)
+    std::unordered_set<std::string>  m_IncludedStructNames;
+    std::unordered_set<std::string>  m_ExternTypeNames;
+};
+static thread_local std::unordered_map<std::string, IncludeCacheEntry> g_IncludeCache;
+
 static std::string ResolveIncludePath(const std::string& baseFile,
                                       const std::string& includeFile)
 {
@@ -834,12 +846,75 @@ struct Parser
         Advance();
 
         std::string resolvedPath = ResolveIncludePath(m_FilePath, includeFile);
-        if (g_IncludedFiles.count(resolvedPath))
-            throw std::runtime_error(m_FilePath + ":" + std::to_string(hashLine) +
-                                     ": circular include: " + resolvedPath);
 
+        // -------------------------------------------------------------------
+        // Diamond-include support: if the file was already included via a
+        // different path, merge from the cached result instead of re-parsing.
+        // This matches the behaviour of C++ include guards / #pragma once.
+        // -------------------------------------------------------------------
+        if (g_IncludedFiles.count(resolvedPath))
+        {
+            auto cacheIt = g_IncludeCache.find(resolvedPath);
+            if (cacheIt == g_IncludeCache.end())
+                return; // Defensive: should not happen, but silently skip.
+
+            const auto& cached = cacheIt->second;
+
+            // Merge structs from the cache, remapping old pointers to new
+            // locations (same logic as the first-parse path below).
+            size_t mergedCount = 0;
+            std::unordered_map<StructType*, StructType*> remap;
+            remap.reserve(cached.m_Structs.size());
+            for (size_t i = 0; i < cached.m_Structs.size(); ++i)
+            {
+                const auto& st = cached.m_Structs[i];
+                if (m_StructMap.count(st.m_Name))
+                    continue; // already defined in this context
+                m_Result.m_Structs.push_back(st); // copy
+                StructType* newPtr = &m_Result.m_Structs.back();
+                remap[cached.m_OriginalPointers[i]] = newPtr;
+                m_StructMap[st.m_Name] = newPtr;
+                ++mergedCount;
+            }
+
+            // Fix up StructType* pointers.
+            size_t baseIdx = m_Result.m_Structs.size() - mergedCount;
+            for (size_t i = baseIdx; i < m_Result.m_Structs.size(); ++i)
+                FixupMembers(m_Result.m_Structs[i].m_Members, remap);
+
+            // Track include for code-gen.
+            m_Result.m_DirectIncludes.push_back(includeFile);
+            for (const auto& st : cached.m_Structs)
+                m_Result.m_IncludedStructNames.insert(st.m_Name);
+            for (const auto& name : cached.m_IncludedStructNames)
+                m_Result.m_IncludedStructNames.insert(name);
+
+            // Propagate extern types.
+            for (const auto& extName : cached.m_ExternTypeNames)
+            {
+                m_ExternMap.insert(extName);
+                m_Result.m_ExternTypeNames.insert(extName);
+            }
+            return;
+        }
+
+        // ---- First time this file is included: parse, cache, merge ----
         g_IncludedFiles.insert(resolvedPath);
         ParseResult inc = ParseFileInternal(resolvedPath);
+
+        // Cache a copy of the parse result BEFORE moving so it can be reused
+        // when the same file is included via a different path (diamond).
+        IncludeCacheEntry cacheEntry;
+        cacheEntry.m_IncludedStructNames = inc.m_IncludedStructNames;
+        cacheEntry.m_ExternTypeNames     = inc.m_ExternTypeNames;
+        cacheEntry.m_Structs.reserve(inc.m_Structs.size());
+        cacheEntry.m_OriginalPointers.reserve(inc.m_Structs.size());
+        for (size_t i = 0; i < inc.m_Structs.size(); ++i)
+        {
+            cacheEntry.m_OriginalPointers.push_back(&inc.m_Structs[i]);
+            cacheEntry.m_Structs.push_back(inc.m_Structs[i]); // deep copy
+        }
+        g_IncludeCache[resolvedPath] = std::move(cacheEntry);
 
         // Collect old addresses and names BEFORE any moves (deque elements
         // are at fixed addresses, but their contents will be moved-from).
@@ -849,13 +924,18 @@ struct Parser
             entries.push_back({ &st, st.m_Name });
 
         // Move structs into result and build old→new remap.
+        // Silently skip structs that are already defined in this context
+        // (they arrived via a different include path — diamond pattern).
         std::unordered_map<StructType*, StructType*> remap;
         remap.reserve(entries.size());
+        size_t skippedCount = 0;
         for (auto& [oldPtr, name] : entries)
         {
             if (m_StructMap.count(name))
-                throw std::runtime_error(m_FilePath + ":" + std::to_string(hashLine) +
-                                         ": struct '" + name + "' already defined");
+            {
+                ++skippedCount;
+                continue; // already defined via a different include path
+            }
             m_Result.m_Structs.push_back(std::move(*oldPtr));
             StructType* newPtr = &m_Result.m_Structs.back();
             remap[oldPtr]   = newPtr;
@@ -864,7 +944,7 @@ struct Parser
 
         // Fix up StructType* pointers inside the newly merged struct members.
         // They may have pointed to structs within `inc.m_Structs` (now stale).
-        size_t baseIdx = m_Result.m_Structs.size() - entries.size();
+        size_t baseIdx = m_Result.m_Structs.size() - (entries.size() - skippedCount);
         for (size_t i = baseIdx; i < m_Result.m_Structs.size(); ++i)
             FixupMembers(m_Result.m_Structs[i].m_Members, remap);
 
@@ -2346,6 +2426,7 @@ static ParseResult ParseFileInternal(const std::string& path)
 ParseResult ParseFile(const std::string& path)
 {
     g_IncludedFiles.clear();
+    g_IncludeCache.clear();
 
     std::string absPath;
     try { absPath = fs::absolute(path).string(); }

@@ -1,0 +1,15 @@
+// Verifies that an extern type declared in an included .sr file is visible
+// in the including file.  test_include_extern_shared.sr declares
+// 'extern SharedExternType;', so it must be resolvable here.
+#include "test_include_extern_shared.sr"
+
+cbuffer ExternIncludeCBuffer
+{
+    SharedExternType m_Data;
+    float4           m_Color;
+};
+
+srinput ExternIncludeInputs
+{
+    ExternIncludeCBuffer m_const;
+};

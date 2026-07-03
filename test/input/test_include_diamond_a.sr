@@ -1,0 +1,10 @@
+// Left branch of the diamond include graph.
+// This file includes test_include_diamond_common.sr.
+#include "test_include_diamond_common.sr"
+
+struct DirLight
+{
+    float3 direction;
+    float3 color;
+    float  intensity;
+};

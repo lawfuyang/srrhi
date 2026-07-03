@@ -1,0 +1,3 @@
+// Shared file declaring an extern type — included by test_include_extern_main.sr.
+// Verifies that extern declarations propagate through #include.
+extern SharedExternType;
