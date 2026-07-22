@@ -1,0 +1,30 @@
+// Tests: #define resource alias with SPD_ARRAY defined (array texture branch).
+// SPD_ARRAY is defined here, so Texture2DArray / RWTexture2DArray are used.
+// Expected output uses the alias names:
+//   SPD_TEX<float> SpdArrayInputs_Mip0 : register(t0);
+//   SPD_RW_TEX<float> SpdArrayInputs_Out1 : register(u0);
+//   SPD_RW_TEX<float> SpdArrayInputs_Out2 : register(u1);
+
+#define SPD_ARRAY
+
+#ifdef SPD_ARRAY
+    #define SPD_TEX    Texture2DArray
+    #define SPD_RW_TEX RWTexture2DArray
+#else
+    #define SPD_TEX    Texture2D
+    #define SPD_RW_TEX RWTexture2D
+#endif
+
+cbuffer SpdCb
+{
+    uint m_Mips;
+    uint m_NumSlices;
+};
+
+srinput SpdArrayInputs
+{
+    SpdCb             m_SpdConstants;
+    SPD_TEX<float>    Mip0;
+    SPD_RW_TEX<float> Out1;
+    SPD_RW_TEX<float> Out2;
+};

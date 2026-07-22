@@ -1,0 +1,18 @@
+// Tests: #define of a resource type name used as a member type in srinput.
+// MY_TEX aliases Texture2D, MY_RW_TEX aliases RWTexture2D.
+// [space(1)] keeps resources out of space0 so they don't conflict with g_output.
+// Expected output uses the alias names:
+//   MY_TEX<float4>    ResourceAliasInputs_colorTex  : register(t0, space1);
+//   MY_TEX<float>     ResourceAliasInputs_depthTex  : register(t1, space1);
+//   MY_RW_TEX<float4> ResourceAliasInputs_outputTex : register(u0, space1);
+
+#define MY_TEX    Texture2D
+#define MY_RW_TEX RWTexture2D
+
+[space(1)]
+srinput ResourceAliasInputs
+{
+    MY_TEX<float4>    colorTex;
+    MY_TEX<float>     depthTex;
+    MY_RW_TEX<float4> outputTex;
+};

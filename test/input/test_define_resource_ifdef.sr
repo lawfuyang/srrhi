@@ -1,0 +1,28 @@
+// Tests: #ifdef / #else selecting between two resource type aliases (SPD pattern).
+// SPD_ARRAY is NOT defined, so the #else branch is taken: Texture2D / RWTexture2D.
+// Expected output uses the alias names:
+//   SPD_TEX<float>    SpdInputs_Mip0 : register(t0);
+//   SPD_RW_TEX<float> SpdInputs_Out1 : register(u0);
+//   SPD_RW_TEX<float> SpdInputs_Out2 : register(u1);
+
+#ifdef SPD_ARRAY
+    #define SPD_TEX    Texture2DArray
+    #define SPD_RW_TEX RWTexture2DArray
+#else
+    #define SPD_TEX    Texture2D
+    #define SPD_RW_TEX RWTexture2D
+#endif
+
+cbuffer SpdCb
+{
+    uint m_Mips;
+    uint m_NumWorkGroups;
+};
+
+srinput SpdInputs
+{
+    SpdCb             m_SpdConstants;
+    SPD_TEX<float>    Mip0;
+    SPD_RW_TEX<float> Out1;
+    SPD_RW_TEX<float> Out2;
+};

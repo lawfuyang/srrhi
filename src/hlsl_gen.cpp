@@ -329,13 +329,25 @@ std::string GenerateHlsl(const ParseResult& pr,
                 const std::string globalVarName = srInputDef.m_Name + "_" + cleanedName;
                 bool bUAV = IsUAV(rm.m_Kind);
                 int rn = bUAV ? uavReg++ : srvReg++;
-                // Reconstruct HLSL type name: use original macro name in template arg if applicable.
+                // Reconstruct HLSL type name: use original alias names if applicable.
                 std::string hlslTypeName = rm.m_TypeName;
-                if (!rm.m_OriginalTemplateArg.empty())
+                if (!rm.m_OriginalResourceTypeName.empty() || !rm.m_OriginalTemplateArg.empty())
                 {
                     size_t ltPos = hlslTypeName.find('<');
+                    std::string baseName = (ltPos != std::string::npos)
+                        ? hlslTypeName.substr(0, ltPos) : hlslTypeName;
+                    std::string baseOut = rm.m_OriginalResourceTypeName.empty()
+                        ? baseName : rm.m_OriginalResourceTypeName;
                     if (ltPos != std::string::npos)
-                        hlslTypeName = hlslTypeName.substr(0, ltPos + 1) + rm.m_OriginalTemplateArg + ">";
+                    {
+                        std::string argOut = rm.m_OriginalTemplateArg.empty()
+                            ? rm.m_TemplateArg : rm.m_OriginalTemplateArg;
+                        hlslTypeName = baseOut + "<" + argOut + ">";
+                    }
+                    else
+                    {
+                        hlslTypeName = baseOut;
+                    }
                 }
                 out << hlslTypeName << " " << globalVarName
                     << " : register(" << (bUAV ? "u" : "t") << rn;
@@ -379,13 +391,25 @@ std::string GenerateHlsl(const ParseResult& pr,
         {
             const std::string cleanedName = CleanMemberName(rm.m_MemberName);
             const std::string globalVarName = srInputDef.m_Name + "_" + cleanedName;
-            // Reconstruct HLSL type name: use original macro name in template arg if applicable.
+            // Reconstruct HLSL type name: use original alias names if applicable.
             std::string hlslTypeName = rm.m_TypeName;
-            if (!rm.m_OriginalTemplateArg.empty())
+            if (!rm.m_OriginalResourceTypeName.empty() || !rm.m_OriginalTemplateArg.empty())
             {
                 size_t ltPos = hlslTypeName.find('<');
+                std::string baseName = (ltPos != std::string::npos)
+                    ? hlslTypeName.substr(0, ltPos) : hlslTypeName;
+                std::string baseOut = rm.m_OriginalResourceTypeName.empty()
+                    ? baseName : rm.m_OriginalResourceTypeName;
                 if (ltPos != std::string::npos)
-                    hlslTypeName = hlslTypeName.substr(0, ltPos + 1) + rm.m_OriginalTemplateArg + ">";
+                {
+                    std::string argOut = rm.m_OriginalTemplateArg.empty()
+                        ? rm.m_TemplateArg : rm.m_OriginalTemplateArg;
+                    hlslTypeName = baseOut + "<" + argOut + ">";
+                }
+                else
+                {
+                    hlslTypeName = baseOut;
+                }
             }
             out << "    " << hlslTypeName << " Get" << cleanedName
                 << "() { return " << globalVarName << "; }\n";

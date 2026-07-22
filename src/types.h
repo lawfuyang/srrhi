@@ -350,9 +350,10 @@ inline bool IsUAV(ResourceKind k)
 struct ResourceMember
 {
     ResourceKind m_Kind;
-    std::string  m_TypeName;             // e.g. "Texture2D<float4>" (resolved) or "ByteAddressBuffer"
-    std::string  m_TemplateArg;          // resolved template arg, e.g. "float4"
-    std::string  m_OriginalTemplateArg;  // as written in .sr when it was a macro alias (e.g. "SPD_TYPE")
+    std::string  m_TypeName;                 // e.g. "Texture2D<float4>" (resolved) or "ByteAddressBuffer"
+    std::string  m_TemplateArg;              // resolved template arg, e.g. "float4"
+    std::string  m_OriginalTemplateArg;      // as written in .sr when it was a macro alias (e.g. "SPD_TYPE")
+    std::string  m_OriginalResourceTypeName; // alias name when resource type came from #define (e.g. "SPD_TEX")
     std::string  m_MemberName;
 };
 

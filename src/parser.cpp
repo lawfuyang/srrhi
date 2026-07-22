@@ -227,6 +227,8 @@ struct Parser
     std::unordered_map<std::string, std::string> m_Defines;
     // Type aliases from #define, typedef, or using — name → resolved TypeRef.
     std::unordered_map<std::string, std::shared_ptr<TypeRef>> m_TypeAliases;
+    // Resource type aliases from #define — name → resource type name string (e.g. "Texture2D").
+    std::unordered_map<std::string, std::string> m_ResourceAliases;
 
     // Conditional compilation stack (#if / #ifdef / #else / #endif).
     struct CondFrame
@@ -471,7 +473,7 @@ struct Parser
             if (hasParen && m_Cur.m_Line == condLine &&
                 m_Cur.m_Kind == TokKind::Unknown && m_Cur.m_Text == ")")
                 Advance();
-            return m_Defines.count(macroName) > 0 || m_TypeAliases.count(macroName) > 0;
+            return m_Defines.count(macroName) > 0 || m_TypeAliases.count(macroName) > 0 || m_ResourceAliases.count(macroName) > 0;
         }
 
         // Identifier: macro reference with optional comparison operator
@@ -555,6 +557,7 @@ struct Parser
                 try { return std::stoi(it->second) != 0; } catch (...) { return true; }
             }
             if (m_TypeAliases.count(macroName)) return true; // type alias counts as defined
+            if (m_ResourceAliases.count(macroName)) return true; // resource type alias counts as defined
             return false; // undefined = 0
         }
 
@@ -679,20 +682,50 @@ struct Parser
             else if (m_Cur.m_Kind == TokKind::Ident && m_Cur.m_Line == hashLine)
             {
                 // Type-alias macro: #define FOO float3
-                // Parse and validate the type using the standard type parser.
-                try
+                // First check if the value is a known resource type name (e.g. Texture2D,
+                // RWTexture2DArray, etc.) which ParseNonStructType() does not handle.
+                static const std::vector<std::string> k_AllResourceTypeNames = {
+                    "Texture1D", "Texture1DArray",
+                    "Texture2D", "Texture2DArray", "Texture2DMS", "Texture2DMSArray",
+                    "Texture3D", "TextureCube", "TextureCubeArray",
+                    "Buffer", "StructuredBuffer", "ByteAddressBuffer",
+                    "RaytracingAccelerationStructure",
+                    "RWTexture1D", "RWTexture1DArray",
+                    "RWTexture2D", "RWTexture2DArray",
+                    "RWTexture3D",
+                    "RWBuffer", "RWStructuredBuffer", "RWByteAddressBuffer",
+                    "SamplerState", "SamplerComparisonState",
+                };
+                bool bIsResourceTypeName = false;
+                for (const auto& rtn : k_AllResourceTypeNames)
                 {
-                    auto aliasType = ParseNonStructType();
-                    m_TypeAliases[macroName.m_Text] = std::move(aliasType);
-                    m_Defines[macroName.m_Text] = ""; // also mark defined for defined() checks
+                    if (m_Cur.m_Text == rtn) { bIsResourceTypeName = true; break; }
                 }
-                catch (const std::exception& e)
+                if (bIsResourceTypeName)
                 {
-                    throw std::runtime_error(m_FilePath + ":" + std::to_string(hashLine) +
-                                             ": '#define " + macroName.m_Text +
-                                             "' value is not a valid HLSL type: " + e.what());
+                    // Resource type alias: #define SPD_TEX Texture2D
+                    m_ResourceAliases[macroName.m_Text] = m_Cur.m_Text;
+                    m_Defines[macroName.m_Text] = ""; // mark defined for defined() checks
+                    Advance();
+                    SkipRestOfLine(hashLine);
                 }
-                SkipRestOfLine(hashLine);
+                else
+                {
+                    // Parse and validate the type using the standard type parser.
+                    try
+                    {
+                        auto aliasType = ParseNonStructType();
+                        m_TypeAliases[macroName.m_Text] = std::move(aliasType);
+                        m_Defines[macroName.m_Text] = ""; // also mark defined for defined() checks
+                    }
+                    catch (const std::exception& e)
+                    {
+                        throw std::runtime_error(m_FilePath + ":" + std::to_string(hashLine) +
+                                                 ": '#define " + macroName.m_Text +
+                                                 "' value is not a valid HLSL type: " + e.what());
+                    }
+                    SkipRestOfLine(hashLine);
+                }
             }
             else
             {
@@ -720,6 +753,7 @@ struct Parser
             {
                 m_Defines.erase(m_Cur.m_Text);
                 m_TypeAliases.erase(m_Cur.m_Text);
+                m_ResourceAliases.erase(m_Cur.m_Text);
                 Advance();
             }
             SkipRestOfLine(hashLine);
@@ -1939,6 +1973,17 @@ struct Parser
                     Token typeName = m_Cur; Advance();
                     int typeLine = typeName.m_Line;
 
+                    // Resolve resource type alias: #define SPD_TEX Texture2D
+                    std::string originalResourceTypeName; // non-empty when typeName was a #define alias
+                    {
+                        auto resAliasIt = m_ResourceAliases.find(typeName.m_Text);
+                        if (resAliasIt != m_ResourceAliases.end())
+                        {
+                            originalResourceTypeName = typeName.m_Text;
+                            typeName.m_Text = resAliasIt->second;
+                        }
+                    }
+
                     // ---- Check for unsupported resource types (throw immediately) ----
                     static const std::vector<std::string> k_UnsupportedResources = {
                         "TextureBuffer",
@@ -2174,11 +2219,12 @@ struct Parser
                         }
 
                         ResourceMember rm;
-                        rm.m_Kind                = foundKind;
-                        rm.m_TypeName            = fullTypeName;
-                        rm.m_TemplateArg         = templateArg;
-                        rm.m_OriginalTemplateArg = (originalTemplateArg != templateArg) ? originalTemplateArg : "";
-                        rm.m_MemberName          = memberName.m_Text;
+                        rm.m_Kind                     = foundKind;
+                        rm.m_TypeName                 = fullTypeName;
+                        rm.m_TemplateArg              = templateArg;
+                        rm.m_OriginalTemplateArg      = (originalTemplateArg != templateArg) ? originalTemplateArg : "";
+                        rm.m_OriginalResourceTypeName = originalResourceTypeName;
+                        rm.m_MemberName               = memberName.m_Text;
                         int rmIdx = static_cast<int>(srInputDef.m_Resources.size());
                         srInputDef.m_Resources.push_back(std::move(rm));
                         srInputDef.m_BodyOrder.push_back({1, rmIdx}); // Resource

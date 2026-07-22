@@ -428,7 +428,7 @@ static ComPtr<IDxcBlob> CompileShader(
     }
 
     if (pErrors && pErrors->GetStringLength() > 0)
-        fprintf(stderr, "[dxc] warnings:\n%s\n", pErrors->GetStringPointer());
+        printf("[dxc] warnings:\n%s\n", pErrors->GetStringPointer());
 
     ComPtr<IDxcBlob> pDxil;
     ThrowIfFailed(
@@ -1330,6 +1330,58 @@ static std::vector<HlslRtTestCase> MakeTestCases()
         tests.push_back(std::move(tc));
     }
 
+    // ------------------------------------------------------------------
+    // 20. test_define_resource_alias
+    //     Uses ResourceAliasInputs namespace (test_define_resource_alias.hlsli).
+    //     Verifies that #define MY_TEX Texture2D / #define MY_RW_TEX RWTexture2D
+    //     produce correct accessor functions and the generated hlsli compiles.
+    //     All resources are in space1 — no conflict with g_output @ u0 space0.
+    //
+    //     Resource heap:
+    //       [0] = g_output UAV (u0 space0)
+    //       [1] = colorTex SRV (t0 space1) ← init: {1.0, 2.0, 3.0, 4.0}
+    //       [2] = depthTex SRV (t1 space1) ← init: {0.5}
+    //
+    //     Root signature:
+    //       param[0] = output UAV table (u0 space0)
+    //       param[1] = SRV table (t0 space1 → offset 0, t1 space1 → offset 1)
+    // ------------------------------------------------------------------
+    {
+        HlslRtTestCase tc;
+        tc.name       = "test_define_resource_alias";
+        tc.shaderFile = "hlsl_test_define_resource_alias.hlsl";
+        tc.outUavSpace = 0;
+
+        // Texture2D<float4> @ t0 space1  (colorTex, 1×1, init = {1.0, 2.0, 3.0, 4.0})
+        ResSpec colorTex;
+        colorTex.kind = ResKind::Tex2D; colorTex.access = ResAccess::SRV;
+        colorTex.fmt = ResFmt::Float4; colorTex.shaderRegister = 0; colorTex.registerSpace = 1;
+        colorTex.width = 1; colorTex.height = 1; colorTex.depth = 1; colorTex.arraySize = 1;
+        colorTex.initData = { FloatBits(1.0f), FloatBits(2.0f), FloatBits(3.0f), FloatBits(4.0f) };
+        tc.resources.push_back(colorTex);  // heap[1]
+
+        // Texture2D<float> @ t1 space1  (depthTex, 1×1, init = 0.5)
+        ResSpec depthTex;
+        depthTex.kind = ResKind::Tex2D; depthTex.access = ResAccess::SRV;
+        depthTex.fmt = ResFmt::Float1; depthTex.shaderRegister = 1; depthTex.registerSpace = 1;
+        depthTex.width = 1; depthTex.height = 1; depthTex.depth = 1; depthTex.arraySize = 1;
+        depthTex.initData = { FloatBits(0.5f) };
+        tc.resources.push_back(depthTex);  // heap[2]
+
+        // SRV ranges (space1): t0 → heap offset 0, t1 → heap offset 1
+        tc.resRanges.push_back({ D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 0, 1, 0 });
+        tc.resRanges.push_back({ D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1, 1, 1, 1 });
+
+        tc.expected = {
+            FloatBits(1.0f),  // colorTex.Load(0,0,0).x
+            FloatBits(2.0f),  // colorTex.Load(0,0,0).y
+            FloatBits(3.0f),  // colorTex.Load(0,0,0).z
+            FloatBits(4.0f),  // colorTex.Load(0,0,0).w
+            FloatBits(0.5f),  // depthTex.Load(0,0,0)
+        };
+        tests.push_back(std::move(tc));
+    }
+
     return tests;
 }
 
@@ -1891,12 +1943,13 @@ static bool RunTest(
         D3D12_RANGE noWrite = { 0, 0 };
         ctx.readbackBuf->Unmap(0, &noWrite);
 
-        if (ok) printf("PASS\n");
+        if (ok) { printf("PASS\n"); fflush(stdout); }
         return ok;
     }
     catch (const std::exception& e)
     {
         printf("ERROR\n  %s\n", e.what());
+        fflush(stdout);
         return false;
     }
 }
