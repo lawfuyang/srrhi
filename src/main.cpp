@@ -284,7 +284,10 @@ static void ProcessFile(const fs::path& srFile,
                         bool bEmitValidation,
                         const fs::path& exePath)
 {
-    LogMsg("[srrhi] Processing: %s\n", srFile.string().c_str());
+    if (g_Verbose)
+    {
+        LogMsg("[srrhi] Processing: %s\n", srFile.string().c_str());
+    }
 
     // --- Parse ---
     ParseResult pr;
@@ -399,11 +402,17 @@ static void ProcessFile(const fs::path& srFile,
         if (NeedsWrite(hlslOut))
         {
             WriteFile(hlslOut, hlslContent);
-            LogMsg("  HLSL  -> %s\n", hlslOut.string().c_str());
+            if (g_Verbose)
+            {
+                LogMsg("  HLSL  -> %s\n", hlslOut.string().c_str());
+            }
         }
         else
         {
-            LogMsg("  HLSL  up-to-date, skipped: %s\n", hlslOut.string().c_str());
+            if (g_Verbose)
+            {
+                LogMsg("  HLSL  up-to-date, skipped: %s\n", hlslOut.string().c_str());
+            }
         }
         globalPadCount = padCount;
     }
@@ -425,11 +434,17 @@ static void ProcessFile(const fs::path& srFile,
         if (NeedsWrite(cppOut))
         {
             WriteFile(cppOut, cppContent);
-            LogMsg("  C++   -> %s\n", cppOut.string().c_str());
+            if (g_Verbose)
+            {
+                LogMsg("  C++   -> %s\n", cppOut.string().c_str());
+            }
         }
         else
         {
-            LogMsg("  C++   up-to-date, skipped: %s\n", cppOut.string().c_str());
+            if (g_Verbose)
+            {
+                LogMsg("  C++   up-to-date, skipped: %s\n", cppOut.string().c_str());
+            }
         }
         globalPadCount = padCount;
     }
@@ -556,7 +571,10 @@ int main(int argc, char* argv[])
             if (entry.is_regular_file() && entry.path().extension() == ".sr")
             {
                 srFiles.push_back(entry.path());
-                LogMsg("[srrhi] Found: %s\n", entry.path().string().c_str());
+                if (g_Verbose)
+                {
+                    LogMsg("[srrhi] Found: %s\n", entry.path().string().c_str());
+                }
             }
         }
     }
