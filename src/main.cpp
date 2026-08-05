@@ -132,7 +132,8 @@ static int GenerateValidationStubs(const fs::path& headerDir)
 
         // Emit stub definitions for all declared extern types.
         // These stubs must satisfy the static_asserts emitted in the generated header:
-        //   sizeof(T) % 16 == 0  and  alignof(T) >= 16
+        //   Regular cbuffer:  sizeof(T) % 16 == 0
+        //   Push constant:    sizeof(T) % 4  == 0
         // An alignas(16) struct with a 16-byte pad member fulfils both constraints.
         //
         // For qualified names like "nvrhi::rt::IndirectInstanceDesc", we emit the

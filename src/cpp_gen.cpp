@@ -743,19 +743,30 @@ static void CollectExternTypesInTypeRef(
     }
 }
 
-static std::unordered_set<std::string> CollectExternTypesUsedInCBuffers(
-    const ParseResult& pr)
+// Each element: { regular-cbuffer externs, push-constant-cbuffer externs }.
+using ExternTypesByCategory = std::pair<std::unordered_set<std::string>, std::unordered_set<std::string>>;
+
+static ExternTypesByCategory CollectExternTypesUsedInCBuffers(
+    const ParseResult& pr,
+    const std::unordered_set<std::string>& pushConstantCBufferNames)
 {
-    std::unordered_set<std::string> result;
+    std::unordered_set<std::string> regularCB;
+    std::unordered_set<std::string> pushConstantCB;
     for (const auto& bufDef : pr.m_BufferDefs)
     {
+        bool bIsPushConstant = (pushConstantCBufferNames.count(bufDef.m_Name) > 0);
         for (const auto& mv : bufDef.m_Members)
         {
             std::unordered_set<std::string> visited;
-            CollectExternTypesInTypeRef(mv.m_Type, pr, visited, result);
+            std::unordered_set<std::string> temp;
+            CollectExternTypesInTypeRef(mv.m_Type, pr, visited, temp);
+            if (bIsPushConstant)
+                pushConstantCB.insert(temp.begin(), temp.end());
+            else
+                regularCB.insert(temp.begin(), temp.end());
         }
     }
-    return result;
+    return {regularCB, pushConstantCB};
 }
 
 // ---------------------------------------------------------------------------
@@ -786,15 +797,40 @@ std::string GenerateCpp(const ParseResult& pr,
     if (!pr.m_SrInputDefs.empty())
         out << "#include <cstring>\n";
 
+    // Build the set of cbuffer names that are used as push constants.
+    // Used to distinguish regular-cbuffer extern type constraints (16-byte)
+    // from push/root-constant extern type constraints (4-byte).
+    std::unordered_set<std::string> pushConstantCBufferNames;
+    for (const auto& srInputDef : pr.m_SrInputDefs)
+    {
+        for (const auto& member : srInputDef.m_Members)
+        {
+            if (member.m_bIsPushConstant)
+                pushConstantCBufferNames.insert(member.m_CBufferName);
+        }
+    }
+
     // Collect extern types that are actually used in cbuffers — only those need
     // size/alignment/trivially-copyable static_asserts.  Extern types used solely
     // as StructuredBuffer/RWStructuredBuffer template args are excluded.
-    const std::unordered_set<std::string> externTypesInCBuffers =
-        CollectExternTypesUsedInCBuffers(pr);
+    // Separates into two categories: regular cbuffer externs (16-byte constraint)
+    // and push-constant cbuffer externs (4-byte constraint).
+    const auto [externTypesInCBuffers, externTypesInPushConstants] =
+        CollectExternTypesUsedInCBuffers(pr, pushConstantCBufferNames);
+
+    // Push-constant-only extern types: types used only in push-constant cbuffers,
+    // NOT also in regular cbuffers. Regular cbuffer types always require the
+    // stricter 16-byte constraint, so they are excluded from the 4-byte set.
+    std::unordered_set<std::string> pushConstantOnlyExterns;
+    for (const auto& name : externTypesInPushConstants)
+    {
+        if (!externTypesInCBuffers.count(name))
+            pushConstantOnlyExterns.insert(name);
+    }
 
     // Include <type_traits> for the static_assert on std::is_trivially_copyable_v
     // emitted for cbuffer-used extern types.
-    if (!externTypesInCBuffers.empty())
+    if (!externTypesInCBuffers.empty() || !pushConstantOnlyExterns.empty())
         out << "#include <type_traits>\n";
 
     // Include srrhi.h for ResourceEntry and ResourceType (resource binding API).
@@ -832,14 +868,19 @@ std::string GenerateCpp(const ParseResult& pr,
     out << "\n";
 
     // Emit static_asserts for extern types that are used in cbuffers.
-    // These run at the user's compile time to validate the 16-byte assumptions
-    // that srrhi makes about extern types' size and alignment.
+    // These run at the user's compile time to validate the size/alignment assumptions
+    // that srrhi makes about extern types.
+    //
+    // Two categories:
+    //   Regular cbuffer: sizeof(T) % 16 == 0  (HLSL cbuffer packing — one register)
+    //   Push constant:   sizeof(T) % 4  == 0  (D3D12 root constants — 32-bit DWORDs)
+    //
     // Extern types used only in StructuredBuffer/RWStructuredBuffer do NOT need
     // these constraints and are therefore excluded.
     if (!externTypesInCBuffers.empty())
     {
         out << "// ---------------------------------------------------------------------------\n";
-        out << "// Extern type constraints (cbuffer-used types only)\n";
+        out << "// Extern type constraints (regular cbuffer types)\n";
         out << "//\n";
         out << "// The following types were declared 'extern' in the .sr source and are used\n";
         out << "// inside cbuffer definitions.  srrhi makes two assumptions about each such\n";
@@ -850,9 +891,6 @@ std::string GenerateCpp(const ParseResult& pr,
         out << "// Note: alignof(T) >= 16 is NOT required because srrhi uses std::memcpy to\n";
         out << "// copy extern types into the cbuffer upload buffer, so the source alignment\n";
         out << "// of the extern type does not matter.\n";
-        out << "//\n";
-        out << "// Extern types used only in StructuredBuffer/RWStructuredBuffer are exempt\n";
-        out << "// from these constraints and have no static_asserts generated.\n";
         out << "//\n";
         out << "// The static_asserts below verify these assumptions at compile time.\n";
         out << "// If an assert fires, adjust the extern type to satisfy the constraint.\n";
@@ -869,6 +907,33 @@ std::string GenerateCpp(const ParseResult& pr,
             out << "static_assert(std::is_trivially_copyable_v<" << extName << ">,\n";
             out << "    \"srrhi: extern type '" << extName
                 << "' must be trivially copyable (memcpy-safe for cbuffer upload)\");\n";
+        }
+        out << "\n";
+    }
+
+    if (!pushConstantOnlyExterns.empty())
+    {
+        out << "// ---------------------------------------------------------------------------\n";
+        out << "// Extern type constraints (push/root-constant cbuffer types)\n";
+        out << "//\n";
+        out << "// The following extern types are used exclusively in [push_constant] cbuffers.\n";
+        out << "// D3D12 root constants require each value to be a 32-bit DWORD, so the total\n";
+        out << "// size must be a multiple of 4 bytes (not 16).\n";
+        out << "//   1. sizeof(T) % 4  == 0           -- size is a multiple of 4 (one DWORD)\n";
+        out << "//   2. std::is_trivially_copyable_v<T> -- safe to memcpy\n";
+        out << "//\n";
+        out << "// IMPORTANT -- extern types must be visible before including this header:\n";
+        out << "//   Either #include the header(s) that define these types before this file,\n";
+        out << "//   or define them directly above the #include of this generated header.\n";
+        out << "// ---------------------------------------------------------------------------\n";
+        for (const auto& extName : pushConstantOnlyExterns)
+        {
+            out << "static_assert(sizeof(" << extName << ") % 4 == 0,\n";
+            out << "    \"srrhi: extern type '" << extName
+                << "' must have sizeof divisible by 4 (D3D12 root constant DWORD alignment)\");\n";
+            out << "static_assert(std::is_trivially_copyable_v<" << extName << ">,\n";
+            out << "    \"srrhi: extern type '" << extName
+                << "' must be trivially copyable (memcpy-safe for root constant upload)\");\n";
         }
         out << "\n";
     }
@@ -1023,26 +1088,50 @@ std::string GenerateCpp(const ParseResult& pr,
         // Register space: always taken from the top-level srinput (not nested srinputs)
         out << "    static constexpr uint32_t RegisterSpace = " << std::max(0, srInputDef.m_RegisterSpace) << ";\n";
 
-        // PushConstantBytes: size of the push constant struct (if any), or 0 if none
+        // PushConstantBytes: size of the push constant struct (if any), or 0 if none.
+        // For extern types whose sizeof is unknown at generation time, emit sizeof(ExternType).
         {
             uint32_t pushConstantBytes = 0;
+            std::string externTypeName;
             for (const auto& member : flat.m_Members)
             {
                 if (member.m_bIsPushConstant)
                 {
-                    // Find the layout for this cbuffer to get its size
-                    for (const auto& lm : layouts)
+                    // Check if the cbuffer contains any extern types first.
+                    // If it does, we emit sizeof(ExternType) because the layout
+                    // engine cannot compute a complete size for extern fields.
+                    for (const auto& bufDef : pr.m_BufferDefs)
                     {
-                        if (lm.m_Name == member.m_CBufferName)
+                        if (bufDef.m_Name == member.m_CBufferName)
                         {
-                            pushConstantBytes = lm.m_Size;
+                            std::unordered_set<std::string> visited;
+                            std::unordered_set<std::string> externs;
+                            for (const auto& mv : bufDef.m_Members)
+                                CollectExternTypesInTypeRef(mv.m_Type, pr, visited, externs);
+                            if (!externs.empty())
+                                externTypeName = *externs.begin();
                             break;
+                        }
+                    }
+                    if (externTypeName.empty())
+                    {
+                        // No extern types — use the layout-computed size.
+                        for (const auto& lm : layouts)
+                        {
+                            if (lm.m_Name == member.m_CBufferName)
+                            {
+                                pushConstantBytes = lm.m_Size;
+                                break;
+                            }
                         }
                     }
                     break;  // Only one push constant allowed per srinput
                 }
             }
-            out << "    static constexpr uint32_t PushConstantBytes = " << pushConstantBytes << ";\n";
+            if (!externTypeName.empty())
+                out << "    static constexpr uint32_t PushConstantBytes = sizeof(" << externTypeName << ");\n";
+            else
+                out << "    static constexpr uint32_t PushConstantBytes = " << pushConstantBytes << ";\n";
         }
 
         // Compose cbuffer structs directly as member variables (inlined from nested srinputs too)

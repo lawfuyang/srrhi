@@ -1,0 +1,17 @@
+// Push constant with namespace-qualified extern type.
+// Same as test_push_constant_extern_basic but with a namespace :: qualifier.
+// Verifies that sizeof(engine::PushData) is emitted correctly and
+// the static_assert uses % 4 == 0.
+
+extern engine::PushData;
+
+cbuffer PushExternNSCB
+{
+    engine::PushData m_Data;
+};
+
+srinput PushExternNSInputs
+{
+    [push_constant]
+    PushExternNSCB m_PushCB;
+};

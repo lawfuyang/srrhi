@@ -1,0 +1,18 @@
+// Push constant with extern type: cbuffer containing an extern type declared
+// as [push_constant] in the srinput.  The generated C++ header must emit:
+//   PushConstantBytes = sizeof(MyPushConstantType)
+// instead of 0, and the static_assert must check % 4 == 0 (root constant DWORD
+// alignment) rather than % 16 == 0 (cbuffer register alignment).
+
+extern MyPushConstantType;
+
+cbuffer PushExternCB
+{
+    MyPushConstantType m_Data;
+};
+
+srinput PushExternInputs
+{
+    [push_constant]
+    PushExternCB m_PushCB;
+};
