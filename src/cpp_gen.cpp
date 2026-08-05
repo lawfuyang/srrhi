@@ -1218,23 +1218,19 @@ std::string GenerateCpp(const ParseResult& pr,
             out << "\n";
             uint32_t resourceIdx = 0;
 
-            // CBuffer setters: simple void* overload only
+            // CBuffer setters: simple void* overload only.
+            // Push constants do not generate a setter — their data is set directly
+            // on the push constant struct (m_Resources entry is pre-populated at construction).
             for (const auto& member : flat.m_Members)
             {
-                const std::string setterName = "Set" + CleanMemberName(member.m_MemberName);
                 if (member.m_bIsPushConstant)
                 {
-                    // Push constant setter: stores a pointer to the push constant bytes.
-                    // NOTE: This stores only a pointer — make sure the pointed-to data
-                    // does not go out of scope before the GPU finishes using it.
-                    out << "    void " << setterName << "(void* pushConstantsBytes)"
-                        << " { m_Resources[" << resourceIdx << "].pResource = pushConstantsBytes; }\n";
+                    ++resourceIdx;
+                    continue;
                 }
-                else
-                {
-                    out << "    void " << setterName << "(void* pResource)"
-                        << " { m_Resources[" << resourceIdx << "].pResource = pResource; }\n";
-                }
+                const std::string setterName = "Set" + CleanMemberName(member.m_MemberName);
+                out << "    void " << setterName << "(void* pResource)"
+                    << " { m_Resources[" << resourceIdx << "].pResource = pResource; }\n";
                 ++resourceIdx;
             }
 
